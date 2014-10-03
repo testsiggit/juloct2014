@@ -1,0 +1,287 @@
+SET FOREIGN_KEY_CHECKS=0;
+TRUNCATE `oa_company`;
+TRUNCATE `oa_company_annual_capex`;
+TRUNCATE `oa_company_annual_ebidax`;
+TRUNCATE `oa_company_annual_report`;
+TRUNCATE `oa_company_play`;
+TRUNCATE `oa_company_play_annual_capex`;
+TRUNCATE `oa_company_play_annual_production`;
+TRUNCATE `oa_company_play_annual_wells`;
+TRUNCATE `oa_company_play_details`;
+TRUNCATE `oa_company_quarter_report`;
+TRUNCATE `oa_play`;
+SET FOREIGN_KEY_CHECKS=1;
+TRUNCATE TABLE `oa_log_table`;
+TRUNCATE oa_processed_files;
+
+
+
+
+SET FOREIGN_KEY_CHECKS=0;
+TRUNCATE `oa_company_play`;
+TRUNCATE `oa_company_play_annual_capex`;
+TRUNCATE `oa_company_play_annual_production`;
+TRUNCATE `oa_company_play_annual_wells`;
+TRUNCATE `oa_company_play_details`;
+SET FOREIGN_KEY_CHECKS=1;
+TRUNCATE TABLE `oa_log_table` ;
+TRUNCATE oa_processed_files;
+
+
+
+
+SET FOREIGN_KEY_CHECKS=0;
+TRUNCATE `da_alternate_address`;
+TRUNCATE `da_bottom_hole_location`;
+TRUNCATE `da_canned_restrictions`;
+TRUNCATE `da_canned_restriction_fields`;
+TRUNCATE `da_check_register`;
+TRUNCATE `da_field`;
+TRUNCATE `da_field_bottom_hole_location`;
+TRUNCATE `da_field_specific_data`;
+TRUNCATE `da_free_form_restrictions`;
+TRUNCATE `da_free_form_restriction_fields`;
+TRUNCATE `da_gis_bottom_hole_location_coordinates`;
+TRUNCATE `da_gis_surface_location_coordinates`;
+TRUNCATE `da_permit_master`;
+TRUNCATE `da_permit_remarks`;
+TRUNCATE `da_root`;
+SET FOREIGN_KEY_CHECKS=1;
+TRUNCATE TABLE `da_processed_files`; 
+TRUNCATE TABLE `da_error_log`;
+TRUNCATE TABLE `ea_saving_sent_emails`;
+TRUNCATE TABLE `ea_email_matching_apis`;
+
+
+
+
+
+
+SET FOREIGN_KEY_CHECKS=0;
+TRUNCATE ea_alert_config;
+TRUNCATE ea_user_alerts;
+SET FOREIGN_KEY_CHECKS=1;
+
+
+TRUNCATE `cache`;
+TRUNCATE `cache_admin_menu`;
+TRUNCATE `cache_apachesolr`;
+TRUNCATE `cache_block`;
+TRUNCATE `cache_bootstrap`;
+TRUNCATE `cache_brightcove`;
+TRUNCATE `cache_entity_comment`;
+TRUNCATE `cache_entity_file`;
+TRUNCATE `cache_entity_node`;
+TRUNCATE `cache_entity_taxonomy_term`;
+TRUNCATE `cache_entity_taxonomy_vocabulary`;
+TRUNCATE `cache_entity_user`;
+TRUNCATE `cache_field`;
+TRUNCATE `cache_filter`;
+TRUNCATE `cache_form`;
+TRUNCATE `cache_image`;
+TRUNCATE `cache_libraries`;
+TRUNCATE `cache_menu`;
+TRUNCATE `cache_metatag`;
+TRUNCATE `cache_page`;
+TRUNCATE `cache_panels`;
+TRUNCATE `cache_path`;
+TRUNCATE `cache_token`;
+TRUNCATE `cache_update`;
+TRUNCATE `cache_views`;
+TRUNCATE `cache_views_data`;
+
+
+
+
+
+
+
+Wellbore and approved date:
+---------------------------
+
+SELECT `permit_master_id`,`root_id`, `final_approved_date`,`directional_well_flag`,`sidetrack_well_flag`,`horizontal_well_flag`,`api_number` FROM `da_permit_master` 
+WHERE `final_approved_date` = '2014-09-13' 
+
+SELECT `final_approved_date`,`directional_well_flag`,`sidetrack_well_flag`,`horizontal_well_flag`,`api_number` FROM `da_permit_master` 
+WHERE `root_id` > 1587 and `final_approved_date` = '2014-09-22'
+
+
+SELECT `root_id`, `final_approved_date`,`directional_well_flag`,`sidetrack_well_flag`,`horizontal_well_flag`,`api_number` FROM `da_permit_master` 
+WHERE `api_number` = '02533938'
+
+
+
+
+
+
+
+
+
+select p.play,p.county_code,p.district_code from da_root r join dp_play p on (r.county_code = p.county_code and r.district=p.district_code)
+
+
+
+
+
+DROP TABLE `ascii_table`, `da_alternate_address`, `da_bottom_hole_location`, `da_canned_restrictions`, `da_canned_restriction_fields`, 
+`da_check_register`, `da_field`, `da_field_bottom_hole_location`, `da_field_specific_data`, `da_free_form_restrictions`, `da_free_form_restriction_fields`,
+ `da_gis_bottom_hole_location_coordinates`, `da_gis_surface_location_coordinates`, `da_permit_master`, `da_permit_remarks`, `da_root`;
+
+
+
+
+
+
+
+SELECT f.field_id, f.field_number, fs.field_specific_data_id, fbhl.field_bottom_hole_location_id FROM `da_field` f 
+left join da_field_specific_data fs on f.field_id = fs.field_id left join da_field_bottom_hole_location fbhl on f.field_id = fbhl.field_id 
+WHERE f.permit_master_id = 6 
+
+
+SELECT count(*),`permit_master_id` FROM `da_alternate_address` group by `permit_master_id` having count(*) > 1 
+
+SELECT count(*),`root_id` FROM `da_gis_bottom_hole_location_coordinates` group by `root_id` having count(*) > 1 
+
+SELECT count(*),`root_id` FROM `da_gis_surface_location_coordinates` group by `root_id` having count(*) > 1 
+
+
+SELECT `permit_master_id`,`root_id`,`permit_total_depth` FROM `da_permit_master` WHERE `permit_total_depth` between '00280' and '03500' 
+
+SELECT MIN(`permit_total_depth`),MAX(`permit_total_depth`) FROM `da_permit_master` WHERE 1 
+
+
+select t1.root_id, t1.status_number, t1.lease_name, t2.permit_master_id, t2.api_number,
+t3.field_id, t4.field_specific_data_id , t5.field_bottom_hole_location_id, t6.canned_restrictions_id, t7.canned_restriction_fields_id,
+t8.free_form_restrictions_id,t10.bottom_hole_location_id,t11.alternate_address_id,t12.permit_remarks_id,t13.check_register_id,
+t14.gis_surf_loc_coord_id,t15.gis_bot_hole_loc_coord_id from da_root t1
+join da_permit_master t2 on t1.root_id = t2.root_id
+left join da_field t3 on t2.permit_master_id=t3.permit_master_id
+left join da_field_specific_data t4 on t3.field_id = t4.field_id
+left join da_field_bottom_hole_location t5 on t3.field_id = t5.field_id
+left join da_canned_restrictions t6 on t2.permit_master_id=t6.permit_master_id 
+left join da_canned_restriction_fields t7 on t6.canned_restrictions_id=t7.canned_restrictions_id  
+left join da_free_form_restrictions t8 on t2.permit_master_id=t8.permit_master_id
+left join da_bottom_hole_location t10 on t2.permit_master_id=t10.permit_master_id
+left join da_alternate_address t11 on t2.permit_master_id=t11.permit_master_id 
+left join da_permit_remarks t12 on t1.root_id=t12.root_id
+left join da_check_register t13 on t1.root_id=t13.root_id 
+left join da_gis_surface_location_coordinates t14 on t1.root_id=t14.root_id 
+left join da_gis_bottom_hole_location_coordinates t15 on t1.root_id=t15.root_id 
+group by t1.root_id 
+limit 0,10
+
+
+
+SELECT ua.* FROM `ea_user_alerts` ua join ea_alert_config ac on ua.alert_id = ac.alert_id WHERE ua.uid=10
+
+
+
+SELECT `company_play_id`, count(*) FROM `oa_company_play_details` group by `company_play_id` having count(*) > 1 
+
+select t1.*,t2.* from oa_company_play t1 join oa_company_play_details t2 on t1.company_play_id = t2.company_play_id where t1.play_id = 2
+select t1.* from oa_company_play_details t1 where t1.company_play_id in ( select company_play_id from oa_company_play where play_id = 2)
+
+
+
+
+
+
+
+
+Alter:
+---------
+ALTER TABLE `oa_company_play_annual_capex` ADD `cpd_id` INT NOT NULL COMMENT 'This is FK of Company Play details' AFTER `company_play_id`;
+ALTER TABLE `oa_company_play_annual_production` ADD `cpd_id` INT NOT NULL COMMENT 'This is FK of Company Play details' AFTER `company_play_id`;
+ALTER TABLE `oa_company_play_annual_wells` ADD `cpd_id` INT NOT NULL COMMENT 'This is FK of Company Play details' AFTER `company_play_id`;
+
+
+
+-----------------------
+
+Email Trigger:
+
+SELECT ua.alert_id,ua.uid,ua.alert_name,ua.status,ac.condition_id,ac.condition_value,ac.additional_notes,c.table_field,c.form_field,c.label_text,u.mail 
+FROM `ea_user_alerts` ua 
+join ea_alert_config ac on ua.alert_id = ac.alert_id join ea_condition c on ac.condition_id = c.condition_id 
+join users u on ua.uid=u.uid WHERE ua.`status` = 1 order by ua.alert_id 
+
+
+
+
+---------------------------------------------------------------------------
+
+
+Check company play exists or not:
+
+select cpd.cpd_id from oa_company_play_details cpd join oa_company_play cp  on cpd.company_play_id = cp.company_play_id 
+join oa_company c on cp.company_id = c.company_id join oa_play p on cp.play_id = p.play_id where c.company_name='Lario Oil & Gas' 
+and p.play_name='Bakken' and cpd.location='Mountrail County, ND' and cpd.project_field = 'Bakken/Three Forks'
+
+
+
+ALTER TABLE `hart_email_alert_1`.`ea_alert_config` 
+DROP FOREIGN KEY `ea alert id`,
+DROP FOREIGN KEY `ea conditon id`;
+ALTER TABLE `hart_email_alert_1`.`ea_alert_config` 
+ADD CONSTRAINT `ea alert id`
+  FOREIGN KEY ()
+  REFERENCES `hart_email_alert_1`.`ea_user_alerts` ()
+  ON DELETE NO ACTION
+  ON UPDATE NO ACTION,
+ADD CONSTRAINT `ea conditon id`
+  FOREIGN KEY ()
+  REFERENCES `hart_email_alert_1`.`ea_condition` ()
+  ON DELETE NO ACTION
+  ON UPDATE NO ACTION;
+  
+  
+  
+ --------------------------------------------------------------------------------------------------------------------------------------
+
+SELECT `permit_master_id`, `root_id`, `da_pmt_issued_date`,`da_pmt_amended_date` , 
+IF(`da_pmt_amended_date`!='' , `da_pmt_amended_date` , `da_pmt_issued_date` ) as approved_date FROM `da_permit_master`  
+
+
+
+
+-----------------------------------------------------------------------------------------------------------------------------------------
+
+
+SELECT t1.root_id AS root_id, t1.lease_name AS lease_name, t1.operator_name AS operator_name, t1.well_number AS well_number, t1.status_number AS status_number, 
+t1.da_app_rcvd_date AS da_app_rcvd_date, t1.da_issue_date AS da_issue_date, t2.permit_master_id AS permit_master_id, t2.da_received_date AS da_received_date, 
+t2.da_pmt_issued_date AS da_pmt_issued_date, t2.da_pmt_amended_date AS da_pmt_amended_date, t2.final_approved_date AS final_approved_date, t2.api_number AS api_number, 
+t2.permit_total_depth AS permit_total_depth, t2.type_application AS type_application, t2.directional_well_flag AS directional_well_flag, 
+t2.sidetrack_well_flag AS sidetrack_well_flag, t2.horizontal_well_flag AS horizontal_well_flag, t8.free_form_restrictions_id AS free_form_restrictions_id, 
+t8.free_restr_remark AS free_restr_remark, t14.surf_loc_longitude AS surf_loc_longitude, t14.surf_loc_lattitude AS surf_loc_lattitude, 
+t15.bottom_hole_longitude AS bottom_hole_longitude, t15.bottom_hole_lattitude AS bottom_hole_lattitude, district.district_name AS district_name, 
+county.county_name AS county_name, appstatus.status_name AS status_name, fp.description AS description FROM da_root t1 
+INNER JOIN da_permit_master t2 ON t1.root_id = t2.root_id INNER JOIN da_field t3 ON t2.permit_master_id = t3.permit_master_id 
+LEFT OUTER JOIN da_field_bottom_hole_location t5 ON t3.field_id = t5.field_id INNER JOIN da_free_form_restrictions t8 ON t2.permit_master_id = t8.permit_master_id 
+INNER JOIN da_gis_surface_location_coordinates t14 ON t1.root_id = t14.root_id INNER JOIN da_gis_bottom_hole_location_coordinates t15 ON t1.root_id = t15.root_id 
+LEFT OUTER JOIN dp_district district ON t1.district = district.district_code LEFT OUTER JOIN dp_county county ON t1.county_code = county.county_code 
+LEFT OUTER JOIN dp_status_of_app_flag appstatus ON t1.status_of_app_flag = appstatus.status_code LEFT OUTER JOIN dp_filling_purpose fp ON t2.type_application = fp.code
+
+where (t1.status_number,t1.status_sequence_number,t2.api_number) IN (('0786632','99','00132745'),('0786626','99','00346312'))
+
+GROUP BY t1.root_id ORDER BY t2.final_approved_date DESC
+
+---------------------------------------------------------------------------------------------------------------------------------------------
+
+SELECT t1.root_id AS root_id, t1.lease_name AS lease_name, t1.operator_name AS operator_name, t1.well_number AS well_number, t1.status_number AS status_number, 
+t1.da_app_rcvd_date AS da_app_rcvd_date, t1.da_issue_date AS da_issue_date, t2.permit_master_id AS permit_master_id, t2.da_received_date AS da_received_date, 
+t2.da_pmt_issued_date AS da_pmt_issued_date, t2.da_pmt_amended_date AS da_pmt_amended_date, t2.final_approved_date AS final_approved_date, t2.api_number AS api_number, 
+t2.permit_total_depth AS permit_total_depth, t2.type_application AS type_application, t2.directional_well_flag AS directional_well_flag, 
+t2.sidetrack_well_flag AS sidetrack_well_flag, t2.horizontal_well_flag AS horizontal_well_flag, t8.free_form_restrictions_id AS free_form_restrictions_id, 
+t8.free_restr_remark AS free_restr_remark, t14.surf_loc_longitude AS surf_loc_longitude, t14.surf_loc_lattitude AS surf_loc_lattitude, 
+t15.bottom_hole_longitude AS bottom_hole_longitude, t15.bottom_hole_lattitude AS bottom_hole_lattitude, district.district_name AS district_name, 
+county.county_name AS county_name, appstatus.status_name AS status_name, fp.description AS description FROM da_root t1 
+INNER JOIN da_permit_master t2 ON t1.root_id = t2.root_id INNER JOIN da_field t3 ON t2.permit_master_id = t3.permit_master_id 
+LEFT OUTER JOIN da_field_bottom_hole_location t5 ON t3.field_id = t5.field_id INNER JOIN da_free_form_restrictions t8 ON t2.permit_master_id = t8.permit_master_id 
+INNER JOIN da_gis_surface_location_coordinates t14 ON t1.root_id = t14.root_id INNER JOIN da_gis_bottom_hole_location_coordinates t15 ON t1.root_id = t15.root_id 
+LEFT OUTER JOIN dp_district district ON t1.district = district.district_code LEFT OUTER JOIN dp_county county ON t1.county_code = county.county_code 
+LEFT OUTER JOIN dp_status_of_app_flag appstatus ON t1.status_of_app_flag = appstatus.status_code LEFT OUTER JOIN dp_filling_purpose fp ON t2.type_application = fp.code
+
+join ea_email_matching_apis ema on ( t1.status_number=ema.status_number and t1.status_sequence_number=ema.sequence_number and t2.api_number = ema.api_number) 
+where ema.sent_email_id = 1 
+
+GROUP BY t1.root_id ORDER BY t2.final_approved_date DESC
