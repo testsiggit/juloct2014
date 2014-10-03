@@ -1,0 +1,11 @@
+ALTER TABLE `da_error_log` ADD `file_id` INT NULL COMMENT '''id'' from ''da_processed_files'' table' AFTER `id`;
+
+ALTER TABLE `da_error_log` ADD `updated_on` DATETIME NULL ;
+
+ALTER TABLE `da_error_log` ADD `api_no` VARCHAR(8) NULL AFTER `file_id`;
+
+ALTER TABLE `da_error_log` CHANGE `linenumber` `fun_name` VARCHAR(100) NULL DEFAULT NULL;
+
+ALTER TABLE `da_bottom_hole_location` CHANGE `pmt_bhl_surface_lease_direction_1` `pmt_bhl_surface_lease_direction_1` VARCHAR(20) CHARACTER SET latin1 COLLATE latin1_swedish_ci NULL DEFAULT NULL, CHANGE `pmt_bhl_surface_lease_direction_2` `pmt_bhl_surface_lease_direction_2` VARCHAR(20) CHARACTER SET latin1 COLLATE latin1_swedish_ci NULL DEFAULT NULL;
+
+ALTER TABLE `da_bottom_hole_location` CHANGE `pmt_bhl_lease_direction_1` `pmt_bhl_lease_direction_1` VARCHAR(20) CHARACTER SET latin1 COLLATE latin1_swedish_ci NULL DEFAULT NULL, CHANGE `pmt_bhl_lease_directon_2` `pmt_bhl_lease_directon_2` VARCHAR(20) CHARACTER SET latin1 COLLATE latin1_swedish_ci NULL DEFAULT NULL;

@@ -1,0 +1,13 @@
+ALTER TABLE `da_root` ADD INDEX (`county_code`);
+ALTER TABLE `da_root` ADD INDEX (`operator_name`);
+ALTER TABLE `da_root` ADD INDEX (`district`);
+
+ALTER TABLE `da_permit_master` ADD INDEX (`final_approved_date`);
+ALTER TABLE `da_permit_master` ADD INDEX (`horizontal_well_flag`);
+ALTER TABLE `da_permit_master` ADD INDEX (`api_number`);
+ALTER TABLE `da_permit_master` ADD INDEX (`permit_total_depth`);
+ALTER TABLE `da_permit_master` ADD INDEX (`type_application`);
+
+ALTER TABLE `da_field` ADD INDEX (`field_application_well_code`);
+
+ALTER TABLE `da_field_bottom_hole_location` ADD INDEX (`fld_bhl_section`);

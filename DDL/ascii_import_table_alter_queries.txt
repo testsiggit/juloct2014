@@ -1,0 +1,3 @@
+ALTER TABLE `dp_type_well_codes` ADD INDEX (`code`);
+ALTER TABLE `dp_filling_purpose` ADD INDEX (`code`);
+ALTER TABLE `dp_status_of_app_flag` ADD INDEX (`status_name`);

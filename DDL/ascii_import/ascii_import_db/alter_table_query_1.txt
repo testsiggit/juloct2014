@@ -1,0 +1,1 @@
+ALTER TABLE `da_permit_master` ADD `final_approved_date` DATE NULL COMMENT 'Insert da_pmt_amended_date if it is not null otherwise da_pmt_issued_date' AFTER `da_pmt_amended_date`;

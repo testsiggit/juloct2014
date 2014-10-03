@@ -1,0 +1,19 @@
+CREATE TABLE `ea_saving_sent_emails` (
+ `id` int(100) NOT NULL AUTO_INCREMENT,
+ `uid` int(11) DEFAULT NULL COMMENT '''uid'' from ''users'' table',
+ `file_id` int(11) DEFAULT NULL COMMENT '''id'' from ''da_processed_files'' table',
+ `alert_id` int(50) DEFAULT NULL COMMENT '''alert_id'' from ''ea_user_alerts'' table',
+ `subject` varchar(500) DEFAULT NULL,
+ `sent_on` datetime DEFAULT NULL,
+ PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=latin1
+
+
+CREATE TABLE `ea_email_matching_apis` (
+ `id` int(11) NOT NULL AUTO_INCREMENT,
+ `sent_email_id` int(11) DEFAULT NULL COMMENT '''id'' from ''ea_saving_sent_emails'' table',
+ `api_number` varchar(8) DEFAULT NULL,
+ `status_number` varchar(7) DEFAULT NULL,
+ `sequence_number` varchar(2) DEFAULT NULL,
+ PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=latin1

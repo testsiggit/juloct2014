@@ -1,0 +1,5 @@
+ALTER TABLE `da_processed_files` CHANGE `process_status` `process_status` ENUM('INPROCESS','COMPLETED') CHARACTER SET latin1 COLLATE latin1_swedish_ci NULL DEFAULT NULL;
+
+DELETE FROM `dp_filling_purpose` WHERE `dp_filling_purpose`.`code` = '05'
+
+DELETE FROM `dp_district` WHERE `dp_district`.`district_code` = '12'
