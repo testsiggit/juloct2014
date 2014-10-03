@@ -1,0 +1,102 @@
+.wrapperField{
+    float:left;
+    margin-left: 0px;
+    margin-top: 20px;
+    white-space: nowrap;        
+    font-size:14px;
+    color:#000;
+    font:bold;
+    Line-height:24px;  
+}
+.wrapperescondField{
+    float:left;
+    margin-left:10px;
+    margin-top: 30px;
+    white-space: nowrap;        
+    font-size:14px;
+    color:#000;
+    font:bold;
+    Line-height:24px;  
+}
+.operatorhead{
+    margin-top: 40px;        
+    font-size:16px;
+    color:#000;
+    opacity: 88;   
+}
+.operatorleasehead{
+    margin-top: 10px;        
+    font-size:16px;
+    color:#000;
+    opacity: 88;   
+}
+
+#dpdetails table th {
+    white-space: nowrap;
+
+}
+#dpdetails table th div{
+    position: absolute;
+    background: transparent;
+    color: #fff;
+    padding: 9px 25px;
+    top: 0;
+    margin-left: -25px;
+    line-height: normal;
+    border-left: 1px solid #800;
+}
+
+.topwarphead{        
+    color: #000;
+    padding: 10px 0 0 0;
+}
+#dpdetails{
+    margin: 40px 0 20px 0;
+    padding: 20px 0;    
+}
+/**/
+
+
+.form_box_sec{height:auto; padding: 10px; width: 100%; background-color:#f9f9f9;border: 1px solid #ddd; display: inline-block; }
+.form_box{ float:left; margin-right: 5px; }
+.form_box select{ width: 125px; color: #000; border-radius:5px;border:1px solid #c2d4dd;font-size:13px;color:#AAAAAA;padding:4px; }
+.clr{ clear: both}
+
+.hr{ height: 1px; width: 100%; background:#ddd;}
+#sbtn{ padding: 15px;margin-top:10px;float:right;}
+
+
+
+.dp_edit_icon{
+    background: url('../assets/edit_icon.png') no-repeat scroll left center #fff;   
+    width: 20px;
+    display:inline-block;
+}    
+.dp_del_icon{
+    background: url('../assets/del_icon.png') no-repeat scroll left center #fff;   
+    width: 20px;
+    display:inline-block;
+}     
+
+.eacrow{
+    border: 1px solid #c8c9c9;
+    color: #787878;
+    padding: 10px 20px;
+    text-transform: capitalize;
+    border-radius: 5px;
+    margin:10px 0;
+}
+
+.fnpt
+{
+    border: 1px solid #c2d4dd;
+    border-radius: 5px;
+    padding: 5px;
+}
+.lbl{
+    color: #5b5b5b;
+    font-size: 0.9em;
+}
+.plc{
+    padding: 1em 0 0;
+}

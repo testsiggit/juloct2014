@@ -1,0 +1,15 @@
+; $Id: ascii_import.info,v 1 2010/11/16 22:48:59 SJS $
+name = Ascii Import
+description = Customization for reading,parsing and inserting data from ASCII file to database.
+package = Hart
+core = 7.x
+files[] = ascii_import.module
+stylesheets[all][] = css/ai_style.css
+;scripts[] = js/jquery-1.6.2.js
+;scripts[] = js/map.js
+;scripts[] = js/store_array.js
+; Information added by drupal.org packaging script on 2010-12-05
+version = "7.x-1.0"
+core = "7.x"
+project = "ascii_import"
+datestamp = "1291559139"

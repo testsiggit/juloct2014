@@ -1,0 +1,1834 @@
+<?php
+//ini_set('display_errors',1); 
+//error_reporting(E_ALL);
+
+// hook_menu
+function ascii_import_menu() {  
+  $items['drilling-permit-import'] = array(
+        'title' => 'Ascii Import',
+        'page callback' => 'dp_data_import',        
+        'access arguments' => array('access content'),
+        'file' => 'ascii_import.inc',
+  );  
+  $items['drilling-permits'] = array(
+      'title' => 'Drilling Permits',
+      'page callback' => 'dplist',      
+      //'access callback' => TRUE,
+      'access callback' => 'ascii_import_check_domain',
+      'type' => MENU_CALLBACK
+  );
+  $items['dpdetails/%/%'] = array(
+      'title' => 'Drilling Permit Details',
+      'page callback' => 'dpmore',   
+      'page arguments' => array(1,2),
+      //'access callback' => TRUE,
+      'access callback' => 'ascii_import_check_domain',
+      'type' => MENU_CALLBACK
+  );
+//  $items['drilling_permit_download'] = array(
+//      'title' => 'Drilling Permit download',
+//      'page callback' => 'dpdownload',      
+//      'access callback' => TRUE,
+//      'type' => MENU_CALLBACK
+//  );
+  $items['email-alert-config'] = array(
+      'title' => 'Manage Alerts',
+      'page callback' => 'eac_list_add',         
+      //'access arguments' => array('access dp eac'),
+      'access callback' => 'ascii_import_check_domain',
+      'type' => MENU_CALLBACK,
+      'file' => 'email_alert_config.inc',
+  );
+  $items['eac-edit/%'] = array(
+      'title' => 'Update Manage Alerts',
+      'page callback' => 'eac_edit',    
+      'page arguments' => array(1),
+      //'access arguments' => array('access dp eac'),
+      'access callback' => 'ascii_import_check_domain',
+      'type' => MENU_CALLBACK,
+      'file' => 'email_alert_config.inc',
+  );
+  $items['eac-del/%'] = array(
+      'title' => 'Delete Email Alert Configuration',
+      'page callback' => 'eac_delete',    
+      'page arguments' => array(1),
+      //'access arguments' => array('access dp eac'),
+      'access callback' => 'ascii_import_check_domain',
+      'type' => MENU_CALLBACK,
+      'file' => 'email_alert_config.inc',
+  );  
+  $items['eac-unsubscribe/%'] = array(
+      'title' => '',
+      'page callback' => 'eac_unsubscribe',        
+      'page arguments' => array(1),
+      //'access arguments' => array('authenticated user')      
+      'access callback' => 'ascii_import_check_domain',
+  );  
+  return $items;
+}
+
+// Check domain is UGCenter for access
+function ascii_import_check_domain() {
+  $base_url = $GLOBALS['base_url'];
+  if (strpos($base_url, 'ugcenter') === FALSE) return FALSE;
+  //if (strpos($base_url, 'ug.hart.localhost') === FALSE) return FALSE;  
+  return TRUE;
+}
+
+// hook_cronapi
+function ascii_import_cronapi($op, $job = NULL) {
+    $items['ascii_import_db'] = array(
+        'description' => 'Read Unprocessed ASCII file and insert data into database.',
+        'rule' => '0 8 * * *', // 8:00 am daily
+        'callback' => 'dp_data_import',
+        'arguments' => array('all'),
+  'file'=>'ascii_import.inc',
+    );
+    
+    /*
+    $items['ascii_import_disable_alert'] = array(
+        'description' => 'Disable alert settings for inactive users or users have invalid sub.',
+        'rule' => '0 6 * * *', // 6:00 am daily
+        'callback' => 'eac_disable_alert',
+    );
+    */
+
+    return $items;
+}
+
+// hook_theme
+function ascii_import_theme() {
+    return array(
+        'listing_drilling_permit' => array(            
+            'variables' => array(
+                'counties' => array(),
+                'districts' => array(),
+                'welltypes' => array(),
+                'fillingpurposes' => array(),
+                'well_type_flag' => array(),
+                'qstring'=>array()
+             ),
+            'template' => 'templates/drilling_permit_list'
+        ),
+        'drilling_permit_details' => array(            
+            'variables' => array(
+                'root_id' => NULL,
+                'basic_info' => array()
+             ),
+            'template' => 'templates/drilling_permit_details'
+        ),
+        'eaclistadd' => array(            
+            'variables' => array(
+                            'app_status'=>array(),'welltypes'=>array(),'counties'=>array(),'wellbore_profiles'=>array(), 'play_list' => array()
+                           ),
+            'template' => 'templates/eac_list_add'
+        ),
+        'eacedit' => array(            
+            'variables' => array( 'result' => array(),
+                            'app_status'=>array(),'welltypes'=>array(),'counties'=>array(),'wellbore_profiles'=>array(), 'play_list' => array()
+                           ),
+            'template' => 'templates/eac_edit'
+        )
+    );
+}
+
+/**
+ * Implements hook_permission().
+ */
+/*
+function ascii_import_permission() {
+  return array(
+    'access dp eac' => array(
+      'title' => t('Access email alert configuration'),
+      'description' => t('Allow Drilling Permit Email alert configuration'),
+    ),
+  );
+}
+*/
+
+function check_processed_ascii($original_filename){
+    $query = db_select('da_processed_files', 'pf');        
+    $query->condition('pf.original_filename', $original_filename, '=');
+    //$query->condition('pf.process_status', 'COMPLETED', '=');
+    $query->fields('pf',array('id'));        
+    $result = $query->execute()->fetch();   
+    return $result;
+}
+
+function add_processing_ascii($original_filename,$newfilename,$new_file_mod_time){
+    try{
+        $id = db_insert('da_processed_files')
+                ->fields(array( 'original_filename'=>$original_filename,'processing_filename' => $newfilename, 
+                                'proc_file_mod_time'=>$new_file_mod_time , 
+                                'process_start_time'=> date('Y-m-d H:i:s'),'process_status' => 'INPROCESS'  ))
+                ->execute(); 
+        return $id;    
+    }catch(Exception $e){
+        $errordata=array('fun_name'=>__FUNCTION__, 'message'=>$e->getMessage());
+        adderrorlog($errordata);
+    }
+}
+
+function update_processing_ascii_status($id,$status){
+    try{
+        $updated = db_update('da_processed_files')
+                ->fields(array( 'process_end_time'=> date('Y-m-d H:i:s'),'process_status'=>$status  ))
+                ->condition('id', $id, '=')
+                ->execute(); 
+        return $updated;   
+    }catch(Exception $e){
+        $errordata=array('fun_name'=>__FUNCTION__, 'message'=>$e->getMessage());
+        adderrorlog($errordata);
+    }
+}
+
+function get_alert_email_template(){
+    $email_template='';
+    $type = 'page'; 
+    $title = 'PERMIT_EMAIL_ALERT_TEMPLATE';
+    $result = db_query('SELECT nid FROM {node} n WHERE n.title = :mytitle', array(':mytitle' =>   $title));    
+    if($result){
+        foreach ($result as $record) {        
+             $node = node_load($record->nid);
+             $email_template = $node->body['und'][0]['value'];
+        }
+    }
+    return $email_template;
+}
+
+function save_sent_alert_emails($file_id,$alert_id,$subject){
+    try{
+        global $user;
+        $id = db_insert('ea_saving_sent_emails')
+                ->fields(array( 'uid'=>$user->uid,'file_id' => $file_id, 
+                                'alert_id'=>$alert_id , 
+                                'subject'=> $subject,
+                                'sent_on'=>date('Y-m-d H:i:s')  
+                              )
+                        )->execute(); 
+        return $id;    
+    }catch(Exception $e){
+        $errordata=array('fun_name'=>__FUNCTION__, 'message'=>$e->getMessage());
+        adderrorlog($errordata);
+    }
+}
+
+function save_alert_matching_api($sent_email_id,$api_numbers){
+    try{
+        if(count($api_numbers)>0){
+            foreach($api_numbers as $api){
+                $id = db_insert('ea_email_matching_apis')
+                    ->fields(array( 'sent_email_id'=>$sent_email_id,'api_number' => $api['api_number'], 'status_number'=>$api['status_number'],
+                                    'sequence_number' => $api['sequence_number'] ))
+                    ->execute(); 
+            }
+        }    
+    }catch(Exception $e){
+        $errordata=array('fun_name'=>__FUNCTION__, 'message'=>$e->getMessage());
+        adderrorlog($errordata);
+    }
+}
+
+function get_details_for_email($api_number,$status_number,$sequence_number){
+    $query = db_select('da_permit_master', 'pm');        
+    $query->join('da_root', 'r' , 'pm.root_id = r.root_id');     
+    $query->join('dp_filling_purpose', 'fp' , 'pm.type_application = fp.code');   
+    $query->condition('pm.permit_number', $status_number, '=');
+    $query->condition('pm.permit_sequence_number', $sequence_number, '=');
+    $query->condition('pm.api_number', $api_number, '=');    
+    $query->fields('r',array('status_number','status_sequence_number','operator_name'))
+          ->fields('pm',array('final_approved_date','api_number'))
+          ->fields('fp', array('description'));  
+    $result = $query->execute()->fetch();   
+    return $result;
+}
+
+function generate_matching_api_list($api_numbers,$sent_email_id){   
+    //global $base_url;
+    $base_url = 'http://www.ugcenter.com';
+    $apis_table = '';
+    $apicount = count($api_numbers);
+    $limit=25;
+    if($apicount>0){        
+        $apis_table .= '<div style="margin:10px 0; font-weight:bold;">There were '.$apicount.' permits release that matched your alert.</div>';
+        $apis_table .= '<table style="border-collapse : collapse; border : 1px solid black;">'
+                    . '<tr><td style="border : 1px solid black; font-weight:bold;text-align:center;padding:3px 0;">API#</td>'
+                . '<td style="border : 1px solid black;font-weight:bold;text-align:center;padding:3px 0;">Permitted Operator</td>'
+                . '<td style="border : 1px solid black;font-weight:bold;text-align:center;padding:3px 0;">Approved Date</td>'
+                . '<td style="border : 1px solid black;font-weight:bold;text-align:center;padding:3px 0;">Filling Purpose</td></tr>';         
+        $i=1;
+        foreach($api_numbers as $ass){     
+            $assres = get_details_for_email($ass['api_number'],$ass['status_number'],$ass['sequence_number']);
+            $dpdetails_url = $base_url.'/dpdetails/'.$ass['api_number'].'/'.$ass['status_number'];
+            $apis_table .= '<tr><td style="border : 1px solid black;padding:3px 0;">'.l($ass['api_number'], $dpdetails_url ).'</td>'
+                    . '<td style="border : 1px solid black;padding:3px 0;">'.$assres->operator_name.'</td>'
+                    . '<td style="border : 1px solid black;padding:3px 0;">'.date('m/d/Y',strtotime($assres->final_approved_date)).'</td>'
+                    . '<td style="border : 1px solid black;padding:3px 0;">'.$assres->description.'</td>'
+                    . '</tr>';            
+            if($i>=$limit){
+                break;
+            }
+            ++$i;
+        }        
+        $apis_table .= '</table>';
+        
+        if($apicount>$limit){
+            $more_url = $base_url .'/drilling-permits?easrch='.base64_encode($sent_email_id);   
+            $apis_table .= '<div style="margin-top:10px;">'.l( 'View All Permits', $more_url ).'</div>';         
+        }
+    }    
+    return $apis_table;
+}
+
+function he_utf_conversion_two($dataArr){
+    if(is_array($dataArr) && count($dataArr)>0){
+        foreach( $dataArr as $field => $value ){
+            $dataArr[$field] = mb_check_encoding($dataArr[$field], 'UTF-8') ? $dataArr[$field] : utf8_encode($dataArr[$field]);
+        }
+    }
+    return $dataArr;
+}
+
+function get_wellbore_profile_code($directional_well_flag,$sidetrack_well_flag,$horizontal_well_flag) {
+    $string = '';
+    if ($horizontal_well_flag == 'N' && $sidetrack_well_flag == 'N' && $directional_well_flag == 'Y') {
+        $string = 'DR';
+    } else if ($horizontal_well_flag == 'N' && $sidetrack_well_flag == 'Y' && $directional_well_flag == 'Y') {
+        $string = 'DS';
+    } else if ($horizontal_well_flag == 'Y' && $sidetrack_well_flag == 'N' && $directional_well_flag == 'N') {
+        $string = 'HR';
+    } else if ($horizontal_well_flag == 'Y' && $sidetrack_well_flag == 'Y' && $directional_well_flag == 'N') {
+        $string = 'HS';
+    } else if ($horizontal_well_flag == 'N' && $sidetrack_well_flag == 'N' && $directional_well_flag == 'N') {
+        $string = 'VR';
+    } else if ($horizontal_well_flag == 'N' && $sidetrack_well_flag == 'Y' && $directional_well_flag == 'N') {
+        $string = 'VS';
+    }
+    return $string;
+}
+
+function scan_dir($dir) {
+    $ignored = array('.', '..', '.svn', '.htaccess');
+
+    $files = array();    
+    foreach (scandir($dir) as $file) {
+        if (in_array($file, $ignored)) continue;
+        $files[$file] = filemtime($dir . '/' . $file);        
+        //echo date('Y-m-d H:i:s',strtotime($files[$file])); echo '<br>';
+    }
+    //print_r($files);
+    //arsort($files);
+    $files = array_keys($files);
+
+    return ($files) ? $files : false;
+}
+
+///////////////////////////////////////// ASCII Data Import BEGINS //////////////////////////////////////////////////
+
+function dp_data_import() {
+    //global $base_url;   
+    $base_url = 'http://www.ugcenter.com';
+    $GLOBALS['da_proc_file_id']='';
+    $GLOBALS['da_api_no']='';
+    
+    //$et = get_alert_email_template();
+    //echo $et; exit;
+    
+    $read_from_ftp = TRUE;
+    if ($read_from_ftp) {
+      // Read from FTP
+      $ftp_server = variable_get('ascii_ftp_server');
+      $ftp_username = variable_get('ascii_ftp_username');
+      $ftp_password = variable_get('ascii_ftp_password');
+      $file_dir = "ftp://$ftp_username:$ftp_password@$ftp_server";
+      // Read from FTP ends
+    } else {
+      // Read from Local
+      //$file_dir = DRUPAL_ROOT . '/' . drupal_get_path('module', 'ascii_import') . "/import_files/";
+      $file_dir = variable_get('file_public_path', conf_path() . '/files').'/ascii_import/import_files/';
+      // Read from Local ends
+    }
+    
+    $filenames = array();    
+    
+    $dru_files_path = variable_get('file_public_path', conf_path() . '/files');
+    
+    if (!is_dir($dru_files_path .'/drilling_permit')) {
+        mkdir($dru_files_path .'/drilling_permit', 0777);
+    }
+    
+    $dp_dest_dir = $dru_files_path .'/drilling_permit/' ;   
+    
+    $filenames = scan_dir($file_dir);        
+    
+    //print_r($filenames); exit;  
+    //$filenames = array('daf420_28Feb2014.txt');
+    $email_template='';
+    if(is_array($filenames) && count($filenames)>0){
+        
+        $email_template = get_alert_email_template(); 
+        
+        foreach ($filenames as $fn) {
+            
+            $original_filename = $fn;
+            
+            if (!is_dir($file_dir . $fn)) {     // Checking in remote FTP path
+                
+            // Copy to Local as .txt file and then read
+            $farr = explode('.',$fn); 
+            $new_file_path = '';
+            $newfilename = '';
+            $new_file_mod_time = '';
+            $ascii_file_date = (isset($farr[1])) ? $farr[1] : '';
+            $ascii_file_timestamp = ($ascii_file_date!='') ? strtotime($ascii_file_date) : '';
+            
+            if($farr[1]!='txt'){
+                $newfilename = $farr[0].'_'.$farr[1].'.txt';     
+                $new_file_path = $dp_dest_dir.$newfilename;
+				if( !file_exists($new_file_path) ){
+					copy( $file_dir.$original_filename, $new_file_path);
+					chmod($_SERVER['DOCUMENT_ROOT'] . '/'. $new_file_path, 0777);                  
+				}
+                $new_file_mod_time =  date("Y-m-d H:i:s", filemtime($new_file_path));
+            }              
+            // Copy ENDS
+            
+            
+             //print_r($fn);
+            //echo '$mod_time:'.$mod_time; exit;
+            $check_res = check_processed_ascii($original_filename);
+
+            if(!$check_res && file_exists($new_file_path)){   
+
+                $proc_file_id = add_processing_ascii($original_filename,$newfilename,$new_file_mod_time);
+                
+                $GLOBALS['da_proc_file_id'] = $proc_file_id;
+
+                $lines = file($new_file_path);               
+                
+                //print_r($lines);
+                $outer_array = array();
+                $inner_array = array();
+
+                // For Email            
+                $status_of_app_flag = $status_api = array();    
+                $field_application_well_code = $wellcode_api = array();
+                $county_code = $county_api = array();
+                $operator_name = $operator_api = array();
+                $permit_total_depth = $depth_api = array();
+                $wp_code = $wpcode_api = array();
+                $play = $play_api = array();           
+                // Email     
+
+                //Loop through our array, show HTML source as HTML source; and line numbers too.
+                if(count($lines)>0){
+                    foreach ($lines as $line_num => $line) {
+                       //echo "Line #<b>{$line_num}</b> : " . htmlspecialchars($line) . "<br />\n";
+
+                        $whatData = substr($line, 0, 2);
+
+                       //echo 'whatData:'.$whatData.'\n';
+
+                        if ($whatData == '01') {
+                          $inner_array[] = $line;
+                        } elseif ($whatData == '15') {
+                            $inner_array[] = $line;                     
+                            if( isset($lines[$line_num+1]) && substr($lines[$line_num+1], 0, 2) != '15' || !isset($lines[$line_num+1]) ){  
+                                $outer_array[] = $inner_array;   
+                                $inner_array = array();
+                            }
+                        } else {
+                            $inner_array[] = $line;
+                        }
+                    }
+                }
+
+            //echo '<pre>'; print_r($outer_array); exit; 
+
+            if (count($outer_array) > 0) {
+                
+                
+               // Get User Alerts
+               $alert_conditions = array('uid'=>'','name'=>'','mail'=>'','alert_name'=>'','alert_description'=>'',
+                            'status_of_app_flag'=>'','field_application_well_code'=>'',
+                            'county_code'=>'','operator_name'=>'',
+                            'permit_total_depth'=>'','permit_total_depth_MIN'=>'','permit_total_depth_MAX'=>'',
+                            'wp_code'=>'','play'=>''); 
+
+                $conf_sql = "SELECT ua.alert_id,ua.uid,ua.alert_name,ua.alert_description,ua.status,
+                                    ac.condition_id,ac.condition_value,ac.additional_notes,
+                                    c.table_field,c.form_field,c.label_text,
+                                    u.name,u.mail 
+                        FROM `ea_user_alerts` ua 
+                        JOIN `ea_alert_config` ac on ua.alert_id = ac.alert_id 
+                        JOIN `ea_condition` c on ac.condition_id = c.condition_id 
+                        JOIN `users` u on ua.uid=u.uid 
+                        WHERE ua.`status` = :status 
+                        ORDER BY ua.alert_id";        
+                $result = db_query($conf_sql, array(':status' => 1));
+
+                if ($result) {
+                  $alerts = array();  
+                  while ($row = $result->fetchAssoc()) {
+                      //print_r($row); echo '\n';
+                      if( array_key_exists($row['alert_id'],$alerts )){                  
+                          if($row['form_field']=='permit_total_depth' && trim($row['additional_notes'])=='MIN'){                      
+                              $alerts[$row['alert_id']]['permit_total_depth_MIN'] = $row['condition_value'];
+                          }else if($row['form_field']=='permit_total_depth' && trim($row['additional_notes'])=='MAX'){                      
+                              $alerts[$row['alert_id']]['permit_total_depth_MAX'] = $row['condition_value'];
+                          }else{
+                              $alerts[$row['alert_id']][$row['form_field']] = $row['condition_value'];
+                          }
+                      }else{
+                          $alerts[$row['alert_id']] = $alert_conditions;
+                          $alerts[$row['alert_id']]['uid'] = $row['uid'];
+                          $alerts[$row['alert_id']]['name'] = $row['name'];
+                          $alerts[$row['alert_id']]['mail'] = $row['mail'];
+                          $alerts[$row['alert_id']]['alert_name'] = $row['alert_name'];
+                          $alerts[$row['alert_id']]['alert_description'] = $row['alert_description'];
+                          if($row['form_field']=='permit_total_depth' && trim($row['additional_notes'])=='MIN'){                      
+                              $alerts[$row['alert_id']]['permit_total_depth_MIN'] = $row['condition_value'];
+                          }else if($row['form_field']=='permit_total_depth' && trim($row['additional_notes'])=='MAX'){                      
+                              $alerts[$row['alert_id']]['permit_total_depth_MAX'] = $row['condition_value'];
+                          }else{
+                              $alerts[$row['alert_id']][$row['form_field']] = $row['condition_value'];
+                          }               
+                      }
+                  }
+                }
+               //echo '<pre>'; print_r($alerts); 
+               // Get User Alerts ENDS                 
+                
+ 
+               foreach ($outer_array as $key => $dataset) {
+
+                   //print_r($dataset); exit;
+
+                   if (count($dataset) > 0) {
+
+                       $root_id = $permit_master_id = $field_id = $canned_restrictions_id = 0;
+
+                       $root_data = $permit_master_data = $field_data = $field_specific_data = $field_bhl_data = $canned_restrictions_data = $canned_restriction_fields_data = array();
+                       $bhl_data = $alternate_address_data = $permit_remarks_data = $check_register_data = $gis_surface_location_data = $gis_bhl_data = array();                
+
+                       $ffrP = array();    // Free Form Restrictions   08     P
+                       $ffrF = array();    // Free Form Restrictions   08     F
+                       $temp_ffr_F = array();
+
+                       $ff_rest_fields_data = array();    // Free Form Restriction Fields     09                                
+
+                       foreach ($dataset as $dask => $str) {
+                           $whatData = substr($str, 0, 2);
+                                               //echo 'whatData:'.$whatData.'\n';
+                            switch ($whatData) {
+                               case '01':
+                                   $root_data = DAROOT($str);
+                                   break;
+                               case '02':
+                                   $permit_master_data = DAPERMIT($str);
+                                   break;
+                               case '03':
+                                   $field_data[] = DAFIELD($str);
+                                   break;
+                               case '04':
+                                   $field_specific_data[] = DAFLDSPC($str);
+                                   break;
+                               case '05':
+                                   $field_bhl_data[] = DAFLDBHL($str);
+                                   break;
+                               case '06':
+                                  $canned_restrictions_data[] = DACANRES($str);
+                                   break;
+                               case '07':
+                                   $canned_restriction_fields_data[] = DACANFLD($str);
+                                   break;
+
+                               case '08':                            
+                                   $eightRow = DAFRERES($str);                            
+                                   if($eightRow['free_restr_flag']=='P'){
+                                       $ffrP[] = $eightRow;
+                                   }else if($eightRow['free_restr_flag']=='F'){
+
+                                       $last_key = key( array_slice( $ffrF, -1, 1, TRUE ) );
+
+                                       if( strstr($eightRow['free_restr_remark'],'LATERAL # TH1') || strstr($eightRow['free_restr_remark'],'BOTTOM HOLE # BH1') || strstr($eightRow['free_restr_remark'],'SURFACE LOCATION LEASE LINES:') ){                                       
+                                           if(count($temp_ffr_F)>0){
+                                               $ffrF[$last_key] = $temp_ffr_F;
+                                               $temp_ffr_F = array();
+                                               $temp_ffr_F[] = $eightRow;
+                                               $ffrF[] = $temp_ffr_F;
+                                           }else{
+                                               $temp_ffr_F[] = $eightRow;                                        
+                                               if($last_key){
+                                                   $ffrF[$last_key] = $temp_ffr_F;
+                                               }else{
+                                                   $ffrF[] = $temp_ffr_F;
+                                               }
+                                               //print_r($ffrF); exit;
+                                           }    
+                                       }else{
+                                           if(count($temp_ffr_F)>0){
+                                               $temp_ffr_F[] = $eightRow;
+                                               $ffrF[$last_key] = $temp_ffr_F;
+                                           }
+                                       }
+                                   }                            
+                                   //print_r($temp_ffr_F);                            
+                                   break;
+
+                               case '09':
+                                   $nine = DAFREFLD($str);                                                     
+                                   if(count($ff_rest_fields_data)>0){                                    
+                                       $last_ffrf_key = key( array_slice( $ff_rest_fields_data, -1, 1, TRUE ) );
+                                       if( $ff_rest_fields_data[$last_ffrf_key]['free_restr_fld_number'] == $nine['free_restr_fld_number'] ){
+                                           $ff_rest_fields_data[$last_ffrf_key] = $nine;
+                                       }else{
+                                           $ff_rest_fields_data[] = $nine;
+                                       }
+                                   }else{
+                                       $ff_rest_fields_data[] = $nine;
+                                   }                            
+                                   break;
+                               case '10':
+                                   $bhl_data = DAPMTBHL($str);
+                                   break;
+                               case '11':
+                                   $alternate_address_data = DAALTADD($str);
+                                   break;
+                               case '12':
+                                   $permit_remarks_data = DAREMARK($str);
+                                   break;
+                               case '13':
+                                   $check_register_data = DACHECK($str);
+                                   break;
+                               case '14':
+                                   $gis_surface_location_data = DAW999A1($str);
+                                   break;
+                               case '15':
+                                   $gis_bhl_data[] = DAW999B1($str);
+                                   break;
+                           }
+
+                       }
+
+                       //print_r($ffrF); exit;
+                       //print_r($ff_rest_fields_data); exit;
+
+                       $status_number = $root_data['status_number'];
+                       $sequence_number = $root_data['status_sequence_number'];
+                       $api_number = $permit_master_data['api_number'];
+                       $checkStatus = checkStatusNumber($status_number, $sequence_number, $api_number );
+                       $GLOBALS['da_api_no'] = $api_number;
+                       //print_r($checkStatus); exit;                       
+                       
+                       try{ 
+                            db_query('SET foreign_key_checks=0'); 
+                       }catch (Exception $e){
+                            //echo __LINE__ .':'. $e->getMessage();
+                       }
+                       
+                       // ADD
+                       if( !$checkStatus ){
+
+                           $root_id = permit_root_add($root_data);
+
+                           if(count($permit_master_data)>0 && $root_id){
+                               $permit_master_id = permit_master_add($permit_master_data, $root_id);
+                           }
+
+                           // 03 children are 04 and 05
+                           $field_ids = array();
+                           if(count($field_data)>0 && $permit_master_id){  // 03
+                               foreach($field_data as $fdata){
+                                   $field_ids[] = field_add($fdata, $permit_master_id);
+                               }
+                           }
+
+                           if(count($field_specific_data)>0 && count($field_ids)>0 ){     // 04
+                               foreach($field_specific_data as $fkey => $fsdata){
+                                   $field_id = (isset($field_ids[$fkey])) ? $field_ids[$fkey] : 0;
+                                   field_specific_data_add($fsdata,$field_id);
+                               }
+                           }
+                           if(count($field_bhl_data)>0 && count($field_ids)>0 ){      // 05
+                               foreach($field_bhl_data as $fbhlkey => $fbhldata){
+                                   $field_id = (isset($field_ids[$fbhlkey])) ? $field_ids[$fbhlkey] : 0;
+                                   field_bhl_add($fbhldata, $field_id);
+                               }
+                           } 
+
+                           // 06 children are 07
+                           $canned_restrictions_ids = array();
+                           if(count($canned_restrictions_data)>0 && $permit_master_id){    // 06
+                               foreach($canned_restrictions_data as $crdata){
+                                   $canned_restrictions_ids[] = canned_restrictions_add($crdata,$permit_master_id);
+                               }
+                           }
+                           if(count($canned_restriction_fields_data)>0 && count($canned_restrictions_ids)>0 ){  // 07
+                               foreach($canned_restriction_fields_data as $crfkey => $crfdata){
+                                   $canned_restrictions_id = $canned_restrictions_ids[$crfkey];
+                                   canned_restriction_fields_add($crfdata,$canned_restrictions_id);
+                               }
+                           }
+
+
+                           // 08 DAFRERES DA FREE-FORM RESTRICTIONS   //////////////////////////////////////////  BEGINS 
+                           if(count($ffrP)>0){
+                               //echo '<pre>'; print_r($ffrP); echo '</pre>'; exit;
+                               // P Flag
+                               $pcode = $pflag = $pfiller = '';
+                               $pdesc = array();
+                               foreach($ffrP as $drow){
+                                   $pcode = $drow['free_restr_type'];
+                                   $pdesc[] = $drow['free_restr_remark'];
+                                   $pflag = $drow['free_restr_flag'];
+                                   $pfiller = $drow['filler'];
+                               }
+                               if($pcode!='' && count($pdesc)>0){
+                                   //echo 'Pcode: ' . $pcode .',Pdesc: '.$da_restr_remark = implode('',$pdesc).'\n';
+                                   $da_restr_remark = implode('',$pdesc);
+                                   $data['free_restr_type'] = $pcode;
+                                   $data['free_restr_remark'] = $da_restr_remark;
+                                   $data['free_restr_flag'] = $pflag;
+                                   $data['filler'] = $pfiller;
+                                   $da_free_form_restrictions_id = add_free_form_restriction($data,$permit_master_id);
+                               }
+                           }
+
+                           if(count($ffrF)>0){
+                               //echo '<pre>'; print_r($ffrF); echo '</pre>'; exit;       
+                               foreach($ffrF as $fkey => $frow){                        
+                                   // F Flag
+                                   $fcode = $fflag = $ffiller = '';
+                                   $fdesc = array();   
+                                   $bhl = array();
+
+                                   foreach($frow as $fk => $drow){
+                                       $fcode = $drow['free_restr_type'];
+                                       $fdesc[] = $drow['free_restr_remark'];
+                                       $fflag = $drow['free_restr_flag'];
+                                       $ffiller = $drow['filler'];
+                                   }                        
+                                   //echo '<pre>'; print_r($fdesc); exit;
+
+                                   if($fcode!='' && count($fdesc)>0){
+                                       //echo 'Fcode: ' . $fcode;
+                                       //echo '<pre>'; print_r($fdesc);
+                                       $bhl = parseBottomHoleLocation($fdesc);
+                                       $bhl['rrc_tape_record_id'] = '10';
+                                       add_bottom_hole_location($bhl,$permit_master_id);
+                                   } 
+                               }
+                           }                    
+                           // 08 DAFRERES DA FREE-FORM RESTRICTIONS   ////////////////////////////////////////// ENDS
+
+                           if(count($bhl_data)>0 && $permit_master_id){    // 10
+                               bhl_add($bhl_data,$permit_master_id);
+                           }
+                           if(count($alternate_address_data)>0 && $permit_master_id){  // 11
+                               alternate_address_add($alternate_address_data,$permit_master_id);
+                           }
+                           if(count($permit_remarks_data)>0 && $root_id){      // 12
+                               permit_remarks_add($permit_remarks_data,$root_id);
+                           }
+                           if(count($check_register_data)>0 && $root_id){      // 13
+                               check_register_add($check_register_data, $root_id);
+                           }
+                           if(count($gis_surface_location_data)>0 && $root_id){    // 14
+                               gis_surface_location_add($gis_surface_location_data, $root_id);
+                           }
+                           if(count($gis_bhl_data)>0 && $root_id){     // 15
+                               foreach($gis_bhl_data as $gbhldata){
+                                   gis_bhl_add($gbhldata,$root_id);
+                               }
+                           }
+
+
+                       }else{ // UPDATE
+
+                           if( $checkStatus && isset($checkStatus->root_id) && isset($checkStatus->permit_master_id) ){
+
+                               $upd_root_id = $checkStatus->root_id;
+                               $upd_permit_master_id = $checkStatus->permit_master_id;
+
+                               //  01
+                               permit_root_update($root_data, $upd_root_id);   
+
+                               // 02
+                               if(count($permit_master_data)>0 && $upd_root_id){   
+                                   permit_master_update($permit_master_data, $upd_root_id);
+                               }
+
+                               // 03
+                               $field_res = get_field_data_by_pmid( $upd_permit_master_id );
+                               //print_r($field_res); exit;
+                               $cur_fields = array();
+                               if($field_res){
+                                   foreach($field_res as $frow){
+                                       $cur_fields[ $frow->field_id ] = $frow->field_number;
+                                   }
+                               }                        
+                               //print_r($cur_fields); exit;
+                               $match_fields = array();
+                               $tot_fields = array();
+                               if(count($field_data)>0 && $upd_permit_master_id){
+                                   foreach($field_data as $fdata){
+                                       if(in_array($fdata['field_number'],$cur_fields)){               // Update                                    
+                                           $field_id = array_search($fdata['field_number'],$cur_fields);
+                                           field_update($fdata, $upd_permit_master_id , $field_id);
+                                           $match_fields[$field_id] = $fdata['field_number'];
+                                           $tot_fields[] = $field_id;
+                                       }else{                                                          // Add
+                                           $field_id = field_add($fdata, $upd_permit_master_id);
+                                           $tot_fields[] = $field_id;
+                                       }
+                                   }
+                               }
+
+                               if( count($cur_fields)>0 && count($match_fields)>0 ){       // Delete if not matching
+                                   $field_diff = array_diff($cur_fields , $match_fields);
+                                   if(count($field_diff)>0){
+                                       foreach($field_diff as $fd_fid => $fd_fn){
+                                           field_and_child_delete($fd_fid);       // Delete FK tables and PK table
+                                       }
+                                   }
+                               }
+
+                               // 04    
+                               //print_r($tot_fields);
+                               if(count($field_specific_data)>0 && count($tot_fields)>0 ){     // 04
+                                   foreach($field_specific_data as $k => $fsdata){
+                                       $field_id = $tot_fields[$k];
+                                       field_specific_data_delete($field_id);
+                                       field_specific_data_add($fsdata,$field_id);
+                                   }
+                               }
+
+                               // 05                        
+                               if(count($field_bhl_data)>0 && count($tot_fields)>0 ){      // 05
+                                   foreach($field_bhl_data as $fbhlkey => $fbhldata){                                
+                                       $field_id = $tot_fields[$fbhlkey];
+                                       field_bhl_delete($field_id);
+                                       field_bhl_add($fbhldata, $field_id);
+                                   }
+                               } 
+
+
+                               // 06
+                               $canned_res = get_canned_data_by_pmid( $upd_permit_master_id );
+                               //print_r($canned_res); exit;
+                               $cur_canned = array();
+                               if($canned_res){
+                                   foreach($canned_res as $crow){
+                                       $cur_canned[ $crow->canned_restrictions_id ] = $crow->can_restr_key;
+                                   }
+                               } 
+
+                               $match_canned = array();
+                               $tot_canned = array();
+                               if(count($canned_restrictions_data)>0 && $upd_permit_master_id){
+                                   foreach($canned_restrictions_data as $crdata){
+                                       if(in_array($crdata['can_restr_key'],$cur_canned)){               // Update                                    
+                                           $canned_restrictions_id = array_search($crdata['can_restr_key'],$cur_canned);
+                                           canned_restrictions_update($crdata, $upd_permit_master_id , $canned_restrictions_id);
+                                           $match_canned[$canned_restrictions_id] = $crdata['can_restr_key'];
+                                           $tot_canned[] = $canned_restrictions_id;
+                                       }else{                                                          // Add
+                                           $canned_restrictions_id = canned_restrictions_add($crdata, $upd_permit_master_id);
+                                           $tot_canned[] = $canned_restrictions_id;
+                                       }                                
+                                   }
+                               }
+
+                               if( count($cur_canned)>0 && count($match_canned)>0 ){       // Delete if not matching
+                                   $canned_diff = array_diff($cur_canned , $match_canned);
+                                   if(count($canned_diff)>0){
+                                       foreach($canned_diff as $cd_crid => $cd_crk){
+                                           canned_and_child_delete($cd_crid);                // Delete FK tables and PK table
+                                       }
+                                   }
+                               }
+
+
+                               // 07
+                               if(count($canned_restriction_fields_data)>0 && count($tot_canned)>0 ){     // 07
+                                   foreach($canned_restriction_fields_data as $k => $crfdata){
+                                       $canned_restrictions_id = $tot_canned[$k];
+                                       canned_restriction_fields_delete($canned_restrictions_id);
+                                       canned_restriction_fields_add($crfdata,$canned_restrictions_id);
+                                   }
+                               }     
+
+
+                               // 08   P                        
+                               if(count($ffrP)>0){
+                                   $pcode = $pflag = $pfiller = '';
+                                   $pdesc = array();
+                                   foreach($ffrP as $drow){
+                                       $pcode = $drow['free_restr_type'];
+                                       $pdesc[] = $drow['free_restr_remark'];
+                                       $pflag = $drow['free_restr_flag'];
+                                       $pfiller = $drow['filler'];
+                                   }
+                                   if($pcode!='' && count($pdesc)>0){
+                                       //echo 'Pcode: ' . $pcode .',Pdesc: '.$da_restr_remark = implode('',$pdesc).'\n';
+                                       $da_restr_remark = implode('',$pdesc);
+                                       $data['free_restr_type'] = $pcode;
+                                       $data['free_restr_remark'] = $da_restr_remark;
+                                       $data['free_restr_flag'] = $pflag;
+                                       $data['filler'] = $pfiller;
+                                       free_form_restrictions_update($data,$upd_permit_master_id);
+                                   }
+                               }
+
+
+                               // 08   F
+                               if(count($ffrF)>0){
+                                   //echo '<pre>'; print_r($ffrF); echo '</pre>'; exit;       
+                                   bhl_delete($upd_permit_master_id);
+                                   foreach($ffrF as $fkey => $frow){                        
+                                       // F Flag
+                                       $fcode = $fflag = $ffiller = '';
+                                       $fdesc = array();   
+                                       $bhl = array();
+
+                                       foreach($frow as $fk => $drow){
+                                           $fcode = $drow['free_restr_type'];
+                                           $fdesc[] = $drow['free_restr_remark'];
+                                           $fflag = $drow['free_restr_flag'];
+                                           $ffiller = $drow['filler'];
+                                       }                        
+                                       //echo '<pre>'; print_r($fdesc); exit;
+
+                                       if($fcode!='' && count($fdesc)>0){
+                                           //echo 'Fcode: ' . $fcode;
+                                           //echo '<pre>'; print_r($fdesc);
+                                           $bhl = parseBottomHoleLocation($fdesc);
+                                           $bhl['rrc_tape_record_id'] = '10';
+                                           add_bottom_hole_location($bhl,$upd_permit_master_id);
+                                       } 
+                                   }
+                               }
+
+                               // 11
+                               if(count($alternate_address_data)>0 && $upd_permit_master_id){  
+                                   alternate_address_update($alternate_address_data,$upd_permit_master_id);
+                               }                        
+                               if(count($permit_remarks_data)>0 && $upd_root_id){      // 12
+                                   permit_remarks_update($permit_remarks_data,$upd_root_id);
+                               }
+                               if(count($check_register_data)>0 && $upd_root_id){      // 13
+                                   check_register_update($check_register_data, $upd_root_id);
+                               }
+                               if(count($gis_surface_location_data)>0 && $upd_root_id){    // 14
+                                   gis_surface_location_update($gis_surface_location_data, $upd_root_id);
+                               }
+                               if(count($gis_bhl_data)>0 && $upd_root_id){     // 15
+                                   foreach($gis_bhl_data as $gbhldata){
+                                       gis_bhl_update($gbhldata,$upd_root_id);
+                                   }
+                               }                        
+                           }
+                       }    // Update END 
+                       
+                       try{
+                            db_query('SET foreign_key_checks=1');
+                       }catch (Exception $e){
+                           //echo __LINE__ .':'. $e->getMessage();
+                       }
+
+                   }
+                   
+                   
+                   // Find Matching API for each alert 
+                   if(is_array($alerts) && count($alerts)>0){
+                       foreach($alerts as $alert_id => $ua){                           
+                           $uaconfig = array();
+                           if($ua['status_of_app_flag']!=''){
+                               $uaconfig['status_of_app_flag'] = $ua['status_of_app_flag'];
+                           }
+                           if($ua['field_application_well_code']!=''){
+                               $uaconfig['field_application_well_code'] = $ua['field_application_well_code'];
+                           }
+                           if($ua['county_code']!=''){
+                               $uaconfig['county_code'] = $ua['county_code'];
+                           }
+                           if($ua['operator_name']!=''){
+                               $uaconfig['operator_name'] = $ua['operator_name'];
+                           }
+                           if($ua['permit_total_depth_MIN']!='' && $ua['permit_total_depth_MAX']!=''){
+                               $uaconfig['permit_total_depth'] = array('permit_total_depth_MIN'=>(int)$ua['permit_total_depth_MIN'],
+                                                                       'permit_total_depth_MAX'=>(int)$ua['permit_total_depth_MAX']);
+                           }                           
+                           if($ua['wp_code']!=''){
+                               $uaconfig['wp_code'] = $ua['wp_code'];
+                           }
+                           if($ua['play']!=''){
+                               $uaconfig['play'] = $ua['play'];
+                           }  
+                           
+                           //echo '<pre>'; print_r($uaconfig); 
+                           $al_conf_count = count($uaconfig);
+                           if($al_conf_count>0){ 
+                               
+                               if($ascii_file_timestamp == strtotime($permit_master_data['final_approved_date']) ){
+                               
+                               $match_count = 0;
+                               foreach($uaconfig as $conf_field => $conf_val){
+                                   if($conf_field=='status_of_app_flag' && $conf_val==$root_data['status_of_app_flag']){
+                                       $match_count++;
+                                   }
+                                   if($conf_field=='field_application_well_code'){
+                                       if(count($field_data)>0){ 
+                                            foreach($field_data as $fdata){
+                                                if ($fdata['field_application_well_code']!='' && $conf_val==$fdata['field_application_well_code']) {
+                                                    $match_count++;
+                                                    break;
+                                                } 
+                                            }
+                                       }
+                                   }
+                                   if($conf_field=='county_code' && $conf_val==$root_data['county_code']){
+                                       $match_count++;
+                                   }
+                                   if($conf_field=='operator_name' && $conf_val==trim($root_data['operator_name'])){
+                                       $match_count++;
+                                   }
+                                   if($conf_field=='permit_total_depth' && $permit_master_data['permit_total_depth']!=''){
+                                       $ptd = (int)$permit_master_data['permit_total_depth'];
+                                       if($ptd >= $conf_val['permit_total_depth_MIN'] && $ptd <= $conf_val['permit_total_depth_MAX']){
+                                           $match_count++;
+                                       }
+                                   }
+                                   if($conf_field=='wp_code'){
+                                        $directional_well_flag = ($permit_master_data['directional_well_flag']!='') ? $permit_master_data['directional_well_flag'] : 'N';
+                                        $sidetrack_well_flag = ($permit_master_data['sidetrack_well_flag']!='') ? $permit_master_data['sidetrack_well_flag'] : 'N';
+                                        $horizontal_well_flag = ($permit_master_data['horizontal_well_flag']!='') ? $permit_master_data['horizontal_well_flag'] : 'N';
+                                        $wpcode_str = get_wellbore_profile_code($directional_well_flag,$sidetrack_well_flag,$horizontal_well_flag);                                        
+                                        if($wpcode_str==$conf_val){
+                                            $match_count++;
+                                        }
+                                   }
+                                   if($conf_field=='play'){                                         
+                                       $playsql = "select count(*) AS play_match_count from  dp_play where play=:PLAYNAME and county_code=:COUNTY and district_code=:DISTRICT";
+                                       $play_data = array(':PLAYNAME' => $conf_val, ':COUNTY' => $root_data['county_code'], ':DISTRICT' => $root_data['district']);
+                                       $plres = db_query($playsql, $play_data)->fetchAssoc();        
+                                       //print_r($plres);
+                                       if(isset($plres['play_match_count']) && $plres['play_match_count']>0){
+                                            $match_count++;
+                                       }
+                                   }
+                               }    // end for
+                               
+                               
+                               if( $al_conf_count == $match_count){   
+                                    $alerts[$alert_id]['match_api'][] = array('api_number'=>$api_number,'status_number'=>$status_number,'sequence_number'=>$sequence_number);
+                               }            
+                               
+                               
+                               }    // end if ( matching approved date)
+                               
+                           } // end if
+                           
+                           
+                       }
+                   }
+                   
+                   //echo 'AFTER MATCHING:'; print_r($alerts);
+                   
+                   
+                   // Find Matching API for each alert ENDS                   
+                   
+               }   // end for
+               
+           }   // end if
+
+
+
+//           echo 'AFTER MATCHING:';    print_r($alerts);
+            
+           // Trigger an email to user BEGINS
+            if(is_array($alerts) && count($alerts)>0){        
+                
+                foreach($alerts as $alert_id => $user_alert){
+                    
+                    if( isset($user_alert['match_api']) && count($user_alert['match_api'])>0 ){
+                        
+                        //$alert_id = $user_alert['alert_id'];
+                        $alert_name = $user_alert['alert_name'];
+                        $alert_description = $user_alert['alert_description'];
+                        $uniq_match_api = $user_alert['match_api'];
+                    
+                        $subject = 'Drilling Permit Alert: "'.$alert_name.'"';                                                                      
+
+                        $sent_email_id = save_sent_alert_emails($proc_file_id,$alert_id,$subject);
+                        save_alert_matching_api($sent_email_id,$uniq_match_api);
+
+                        $api_table = '';
+                        $api_table .= '<div><strong>Alert Name: </strong>'.$alert_name.'</div>';
+                        if($alert_description!=''){
+                            $api_table .= '<div><strong>Alert Description: </strong>'.$alert_description.'</div>';
+                        }
+                        if(count($uniq_match_api)>0){
+                            $api_table .= generate_matching_api_list($uniq_match_api,$sent_email_id);
+                        }
+
+                        $edit_eac_url = $base_url.'/eac-edit/'.$alert_id;
+                        $unsub_url = $base_url . '/eac-unsubscribe/'.base64_encode($alert_id);
+
+                        $message='';
+                        $search  = array('[PERMITS_LISTED_HERE]', '[MANAGE_EMAIL_ALERTS_URL]', '[UNSUBSCRIBE_URL]');
+                        $replace = array($api_table, $edit_eac_url, $unsub_url);
+                        $email_body = str_replace($search, $replace, $email_template);  
+
+                        $my_module = 'ascii_import';
+                        $my_mail_token = 'bar';
+                        //$from = $site_email;
+                        $from = 'drillingPermits@HartEnergy.com';
+                        $message = array(
+                          'to' => '"'.addslashes(mime_header_encode($user_alert['name'])) .'"<'.$user_alert['mail'].'>',
+                          'subject' => t($subject),
+                          'body' => $email_body,
+                          'headers' => array(
+                            'From' => '"'.addslashes(mime_header_encode('Drilling Permits Alerts')) .'"<'.$from.'>',
+                            'Reply-To' => $from,  
+                            'MIME-Version' => '1.0',
+                            'Content-Type' => 'text/html;charset=utf-8'
+                          )
+                        );
+                        $system = drupal_mail_system($my_module, $my_mail_token);
+                        if ($system->mail($message)) {
+                                 // Success.
+                        }else {
+                          // Failure.                         
+                        }
+                    }
+                }
+           }
+           // Trigger an email to user ENDS
+            
+            
+           update_processing_ascii_status($proc_file_id,'COMPLETED') ;
+            
+
+         }   // check 
+         
+         
+         
+        }   // END - !is_dir()
+
+       }
+   }
+}
+///////////////////////////////////////// ASCII Data Import ENDS //////////////////////////////////////////////////
+
+
+
+
+
+
+// Other Parsings and DB Insertions
+function add_free_form_restriction($data,$permit_master_id){    
+    try{
+        $data = he_utf_conversion_two($data);        
+        $free_form_restrictions_id = db_insert('da_free_form_restrictions')
+                ->fields(array(
+                    'permit_master_id' => $permit_master_id,
+                    'rrc_tape_record_id' => '08',
+                    'free_restr_key' => '',
+                    'free_restr_type' => $data['free_restr_type'],
+                    'free_restr_remark' => $data['free_restr_remark'],
+                    'free_restr_flag' => $data['free_restr_flag'],
+                    'filler' => $data['filler'],
+                    'rrc_tape_filler' => '' 
+                ))
+                ->execute();
+        return $free_form_restrictions_id;
+    }catch (Exception $e){        
+        $errordata=array('fun_name'=>__FUNCTION__, 'message'=>$e->getMessage());
+        adderrorlog($errordata);
+    }
+}
+
+
+function add_bottom_hole_location($data,$permit_master_id){
+    //echo '<pre>'; print_r($data);    
+//    foreach($data['SURFACE_LOCATION_LEASE_LINES'] as $key => $val){
+//        echo $key.':'.strlen($val).'<br>';
+//    }
+    
+    try{
+        $rrc_tape_record_id = $data['rrc_tape_record_id'];
+        $pmt_bhl_acres = '0.0';
+        $pmt_bhl_nearest_well = '';
+        $filler='';
+        $rrc_tape_filler='';
+        $pmt_bhl_pntrt_dist_1 = (isset($data['PENETRATION_POINT_LOCATION']['pmt_bhl_pntrt_dist_1'])) ? $data['PENETRATION_POINT_LOCATION']['pmt_bhl_pntrt_dist_1'] : '0.0';
+        $pmt_bhl_pntrt_dir_1 = (isset($data['PENETRATION_POINT_LOCATION']['pmt_bhl_pntrt_dir_1'])) ? $data['PENETRATION_POINT_LOCATION']['pmt_bhl_pntrt_dir_1'] : '';
+        $pmt_bhl_pntrt_dist_2 = (isset($data['PENETRATION_POINT_LOCATION']['pmt_bhl_pntrt_dist_2'])) ? $data['PENETRATION_POINT_LOCATION']['pmt_bhl_pntrt_dist_2'] : '0.0';
+        $pmt_bhl_pntrt_dir_2 = (isset($data['PENETRATION_POINT_LOCATION']['pmt_bhl_pntrt_dir_2'])) ? $data['PENETRATION_POINT_LOCATION']['pmt_bhl_pntrt_dir_2'] : '';
+        $pmt_bhl_county = (isset($data['TERMINUS_LOCATION']['pmt_bhl_county'])) ? $data['TERMINUS_LOCATION']['pmt_bhl_county'] : '';
+        $pmt_bhl_section = (isset($data['SECTION_BLOCK_ABSTRACT']['pmt_bhl_section'])) ? $data['SECTION_BLOCK_ABSTRACT']['pmt_bhl_section'] : '';
+        $pmt_bhl_block = (isset($data['SECTION_BLOCK_ABSTRACT']['pmt_bhl_block'])) ? $data['SECTION_BLOCK_ABSTRACT']['pmt_bhl_block'] : '';
+        $pmt_bhl_abstract = (isset($data['SECTION_BLOCK_ABSTRACT']['pmt_bhl_abstract'])) ? $data['SECTION_BLOCK_ABSTRACT']['pmt_bhl_abstract'] : '';
+        $pmt_bhl_survey = (isset($data['SURVEY_NAME']['pmt_bhl_survey'])) ? $data['SURVEY_NAME']['pmt_bhl_survey'] : '';
+        $pmt_bhl_lease_feet_1 = (isset($data['LEASE_LINES']['pmt_bhl_lease_feet_1'])) ? $data['LEASE_LINES']['pmt_bhl_lease_feet_1'] : '0.0';
+        $pmt_bhl_lease_direction_1 = (isset($data['LEASE_LINES']['pmt_bhl_lease_direction_1'])) ? $data['LEASE_LINES']['pmt_bhl_lease_direction_1'] : '';
+        $pmt_bhl_lease_feet_2 = (isset($data['LEASE_LINES']['pmt_bhl_lease_feet_2'])) ? $data['LEASE_LINES']['pmt_bhl_lease_feet_2'] : '0.0';
+        $pmt_bhl_lease_directon_2 = (isset($data['LEASE_LINES']['pmt_bhl_lease_directon_2'])) ? $data['LEASE_LINES']['pmt_bhl_lease_directon_2'] : '';    
+        $pmt_bhl_survey_feet_1 = (isset($data['SURVEY_LINES']['pmt_bhl_survey_feet_1'])) ? $data['SURVEY_LINES']['pmt_bhl_survey_feet_1'] : '0.0';
+        $pmt_bhl_survey_direction_1 = (isset($data['SURVEY_LINES']['pmt_bhl_survey_direction_1'])) ? $data['SURVEY_LINES']['pmt_bhl_survey_direction_1'] : '';
+        $pmt_bhl_survey_feet_2 = (isset($data['SURVEY_LINES']['pmt_bhl_survey_feet_2'])) ? $data['SURVEY_LINES']['pmt_bhl_survey_feet_2'] : '0.0';
+        $pmt_bhl_survey_direction_2 = (isset($data['SURVEY_LINES']['pmt_bhl_survey_direction_2'])) ? $data['SURVEY_LINES']['pmt_bhl_survey_direction_2'] : '';
+        $pmt_bhl_surface_lease_feet_1 = (isset($data['SURFACE_LOCATION_LEASE_LINES']['pmt_bhl_surface_lease_feet_1'])) ? $data['SURFACE_LOCATION_LEASE_LINES']['pmt_bhl_surface_lease_feet_1'] : '0.0';
+        $pmt_bhl_surface_lease_direction_1 = (isset($data['SURFACE_LOCATION_LEASE_LINES']['pmt_bhl_surface_lease_direction_1'])) ? $data['SURFACE_LOCATION_LEASE_LINES']['pmt_bhl_surface_lease_direction_1'] : '';
+        $pmt_bhl_surface_lease_feet_2 = (isset($data['SURFACE_LOCATION_LEASE_LINES']['pmt_bhl_surface_lease_feet_2'])) ? $data['SURFACE_LOCATION_LEASE_LINES']['pmt_bhl_surface_lease_feet_2'] : '0.0';
+        $pmt_bhl_surface_lease_direction_2 = (isset($data['SURFACE_LOCATION_LEASE_LINES']['pmt_bhl_surface_lease_direction_2'])) ? $data['SURFACE_LOCATION_LEASE_LINES']['pmt_bhl_surface_lease_direction_2'] : '';
+        $pmt_bhl_surface_lease_total_acres = (isset($data['SURFACE_LOCATION_LEASE_LINES']['pmt_bhl_surface_lease_total_acres'])) ? $data['SURFACE_LOCATION_LEASE_LINES']['pmt_bhl_surface_lease_total_acres'] : '0.0';       
+
+        //echo 'pmt_bhl_lease_feet_1:'.$pmt_bhl_lease_feet_1;
+        //echo 'pmt_bhl_county:'.$pmt_bhl_county;
+        //echo '<br>Len:'.strlen($pmt_bhl_county);
+    
+    
+        $bottom_hole_location_id = db_insert('da_bottom_hole_location') 
+            ->fields(array(
+                'permit_master_id' => $permit_master_id,
+                'rrc_tape_record_id' => $rrc_tape_record_id,
+                'pmt_bhl_section' => $pmt_bhl_section,
+                'pmt_bhl_block' => $pmt_bhl_block,
+                'pmt_bhl_abstract' => $pmt_bhl_abstract,
+                'pmt_bhl_survey' => $pmt_bhl_survey,
+                'pmt_bhl_acres' => $pmt_bhl_acres,
+                'pmt_bhl_nearest_well' => $pmt_bhl_nearest_well,
+                'pmt_bhl_lease_feet_1' => $pmt_bhl_lease_feet_1,
+                'pmt_bhl_lease_direction_1' => $pmt_bhl_lease_direction_1,
+                'pmt_bhl_lease_feet_2' => $pmt_bhl_lease_feet_2,
+                'pmt_bhl_lease_directon_2' => $pmt_bhl_lease_directon_2,
+                'pmt_bhl_survey_feet_1' => $pmt_bhl_survey_feet_1,
+                'pmt_bhl_survey_direction_1' => $pmt_bhl_survey_direction_1,
+                'pmt_bhl_survey_feet_2' => $pmt_bhl_survey_feet_2,
+                'pmt_bhl_survey_direction_2' => $pmt_bhl_survey_direction_2,
+                'pmt_bhl_county' => $pmt_bhl_county,
+                'pmt_bhl_pntrt_dist_1' => $pmt_bhl_pntrt_dist_1,
+                'pmt_bhl_pntrt_dir_1' => $pmt_bhl_pntrt_dir_1,
+                'pmt_bhl_pntrt_dist_2' => $pmt_bhl_pntrt_dist_2,
+                'pmt_bhl_pntrt_dir_2' => $pmt_bhl_pntrt_dir_2,
+                'pmt_bhl_surface_lease_feet_1' => $pmt_bhl_surface_lease_feet_1,
+                'pmt_bhl_surface_lease_direction_1' => $pmt_bhl_surface_lease_direction_1,
+                'pmt_bhl_surface_lease_feet_2' => $pmt_bhl_surface_lease_feet_2,
+                'pmt_bhl_surface_lease_direction_2' => $pmt_bhl_surface_lease_direction_2,
+                'pmt_bhl_surface_lease_total_acres' => $pmt_bhl_surface_lease_total_acres,
+                'filler' => $filler,
+                'rrc_tape_filler' => $rrc_tape_filler,
+            ))->execute();
+            
+            return $bottom_hole_location_id;  
+            
+    }catch (Exception $e){        
+        $errordata=array('fun_name'=>__FUNCTION__, 'message'=>$e->getMessage());
+        adderrorlog($errordata);
+    }
+}
+
+
+function parseBottomHoleLocation($eightF){    
+    $bhl = array();    
+    if(count($eightF)>0){        
+        //$pntrtFlag = false;
+        $pntrtKey1 = $pntrtKey2 = '';
+        
+        foreach($eightF as $k => $row){
+            
+            if(strstr($row,'PENETRATION POINT LOCATION')){
+                //$pntrtFlag = true;                
+                // Next Two Lines
+                if(isset($eightF[$k+1]) && isset($eightF[$k+2])){
+                    $pntrtLease1 = isset($eightF[$k+1]) ? $eightF[$k+1] : '';
+                    $pntrtKey1 = $k+1;
+                    $pntrtLease2 = isset($eightF[$k+2]) ? $eightF[$k+2] : '';
+                    $pntrtKey2 = $k+2;
+                    $pntrt_lease_lines = parsePenetrationLease($pntrtLease1,$pntrtLease2);
+                    if(count($pntrt_lease_lines)>0){
+                        $pntrt_lease_lines = he_utf_conversion_two($pntrt_lease_lines);    
+                        $bhl['PENETRATION_POINT_LOCATION'] = $pntrt_lease_lines;                    
+                    }
+                }
+            }
+            
+            if(strstr($row,'TERMINUS LOCATION')){
+                if(isset($eightF[$k+1])){
+                    $bhcounty = $eightF[$k+1];
+                    if( (strstr($bhcounty,'BH COUNTY:')) ){
+                        $terminus_location = parseTerminusLocation($bhcounty);
+                        if(count($terminus_location)>0){
+                            $terminus_location = he_utf_conversion_two($terminus_location); 
+                            $bhl['TERMINUS_LOCATION'] = $terminus_location;                    
+                        }
+                    }
+                }
+            }
+            
+            if( strstr($row,'SECTION:') && strstr($row,'BLOCK:') && strstr($row,'ABSTRACT:') ){
+                $sbaLine = $row;
+                $section_block_abstract = parseSBA($sbaLine);
+                if(count($section_block_abstract)>0){
+                    $section_block_abstract = he_utf_conversion_two($section_block_abstract); 
+                    $bhl['SECTION_BLOCK_ABSTRACT'] = $section_block_abstract;                    
+                }
+            }
+            
+            if(strstr($row,'SURVEY NAME:')){
+                $pbsArr = explode('SURVEY NAME:',$row);
+                $pmt_bhl_survey = end($pbsArr);
+                $pmt_bhl_survey = trim($pmt_bhl_survey);
+                $pmt_bhl_survey = mb_check_encoding($pmt_bhl_survey, 'UTF-8') ? $pmt_bhl_survey : utf8_encode($pmt_bhl_survey);
+                $bhl['SURVEY_NAME']['pmt_bhl_survey'] = $pmt_bhl_survey;
+            }
+            
+            if($pntrtKey1!=$k && $pntrtKey2!=$k && strstr($row,'LEASE LINES:')){      
+                if(isset($eightF[$k]) && isset($eightF[$k+1])){
+                    $lease1 = $eightF[$k];
+                    $lease2 = $eightF[$k+1];
+                    $lease_lines = parseLease($lease1,$lease2);
+                    if(count($lease_lines)>0){
+                        $lease_lines = he_utf_conversion_two($lease_lines); 
+                        $bhl['LEASE_LINES'] = $lease_lines;                    
+                    }
+                }
+            }
+            
+            if(strstr($row,'SURVEY LINES:')){    
+                if(isset($eightF[$k]) && isset($eightF[$k+1])){
+                    $survey1 = $eightF[$k];
+                    $survey2 = $eightF[$k+1];
+                    $survey_lines = parseSurvey($survey1,$survey2);
+                    if(count($survey_lines)>0){
+                        $survey_lines = he_utf_conversion_two($survey_lines); 
+                        $bhl['SURVEY_LINES'] = $survey_lines;                    
+                    }
+                }
+            }
+            
+             if(strstr($row,'SURFACE LOCATION LEASE LINES:')){        
+                if(isset($eightF[$k+1]) && isset($eightF[$k+2])){ 
+                    $surfLocLease1 = $row;                
+                    $surfLocLease2 = $eightF[$k+1];
+                    $surfLocTotAcres = $eightF[$k+2];
+                    $surf_loc_lease_lines = parseSurfaceLocationLeaseLines($surfLocLease1,$surfLocLease2,$surfLocTotAcres);
+                    if(count($surf_loc_lease_lines)>0){
+                        $surf_loc_lease_lines = he_utf_conversion_two($surf_loc_lease_lines);
+                        $bhl['SURFACE_LOCATION_LEASE_LINES'] = $surf_loc_lease_lines;                    
+                    }
+                }
+            }
+            
+            
+        }
+    }    
+    //echo '<pre>'; print_r($bhl); exit;
+    return $bhl;
+}
+
+function parsePenetrationLease($pntrtLease1,$pntrtLease2){
+    // Eg:
+    // LEASE LINES:     000867.00 FSOUTHEAST    L
+    //                  000430.00 FSOUTHWEST    L   
+    
+    //echo 'pntrtLease1:'.$pntrtLease1;
+    //echo 'pntrtLease2:'.$pntrtLease2;
+    
+    //$t = explode(' ',$pntrtLease1);    print_r($t);
+    
+    $pntrt_lease_lines = array();
+    
+    $pntrtLease1 = str_replace('LEASE LINES:', '', $pntrtLease1);
+    $poneArr = preg_split('/[\s]+/', trim($pntrtLease1) );
+    //print_r($poneArr);
+    $pntrt_lease_lines['pmt_bhl_pntrt_dist_1'] = $poneArr[0];
+    $pntrt_lease_lines['pmt_bhl_pntrt_dir_1'] = $poneArr[1];
+    
+    $ptwoArr = preg_split('/[\s]+/', trim($pntrtLease2) );
+    //print_r($ptwoArr);
+    $pntrt_lease_lines['pmt_bhl_pntrt_dist_2'] = (isset($ptwoArr[0]) && $ptwoArr[0]!='') ? $ptwoArr[0] : '0.0';
+    $pntrt_lease_lines['pmt_bhl_pntrt_dir_2'] = (isset($ptwoArr[1]) && $ptwoArr[1]!='') ? $ptwoArr[1] : '';
+    
+    return $pntrt_lease_lines;
+}
+
+function parseTerminusLocation($bhcounty){
+    // Eg:  BH COUNTY: 097        
+    $terminus_location = array();
+    $bhcounty = str_replace('BH COUNTY:', '', $bhcounty);
+    $terminus_location['pmt_bhl_county'] = trim($bhcounty);
+    return $terminus_location;
+}
+
+function parseSBA($sbaLine){
+    // Eg:  SECTION: 39      BLOCK: 34 T5S    ABSTRACT: 284                       
+    $sba = array();
+    $sba['pmt_bhl_section'] = substrBtwTwoStr($sbaLine,'SECTION:','BLOCK:');
+    $sba['pmt_bhl_block'] = substrBtwTwoStr($sbaLine,'BLOCK:','ABSTRACT:');
+    $pbaArr = explode('ABSTRACT:',$sbaLine);
+    $pmt_bhl_abstract = end($pbaArr);
+    $sba['pmt_bhl_abstract'] = trim($pmt_bhl_abstract);    
+    return $sba;
+}
+
+function substrBtwTwoStr($string,$first,$second){
+    preg_match("/".$first."(.*)".$second."/", $string, $results);
+    //print_r($results);
+    $subStr = trim($results[1]);
+    return $subStr;
+}
+
+function parseLease($lease1,$lease2){
+    // Eg:
+    // LEASE LINES:     000338.00 FNORTHEAST    L                            
+    //                  001515.00 FSOUTH        L                            
+    
+    //echo 'lease1:'.$lease1;
+    //echo 'lease2:'.$lease2;
+    
+    $lease_lines = array();
+    
+    $lease1 = str_replace('LEASE LINES:', '', $lease1);
+    $loneArr = preg_split('/[\s]+/', trim($lease1) );
+    //print_r($loneArr);
+    $lease_lines['pmt_bhl_lease_feet_1'] = $loneArr[0];
+    $lease_lines['pmt_bhl_lease_direction_1'] = $loneArr[1];
+    
+    $ltwoArr = preg_split('/[\s]+/', trim($lease2) );
+    //print_r($ltwoArr);
+    $lease_lines['pmt_bhl_lease_feet_2'] = (isset($ltwoArr[0]) && $ltwoArr[0]!='') ? $ltwoArr[0] : '0.0';
+    $lease_lines['pmt_bhl_lease_directon_2'] = $ltwoArr[1];
+    
+    return $lease_lines;
+}
+
+function parseSurvey($survey1,$survey2){
+    // Eg:
+    // SURVEY LINES:    000218.00 FSOUTHEAST    L                            
+    //                  000249.00 FSOUTHWEST    L                            
+    
+    //echo 'survey1:'.$survey1;
+    //echo 'survey2:'.$survey2;
+    
+    $survey_lines = array();
+    
+    $survey1 = str_replace('SURVEY LINES:', '', $survey1);
+    $soneArr = preg_split('/[\s]+/', trim($survey1) );
+    //print_r($soneArr);
+    $survey_lines['pmt_bhl_survey_feet_1'] = (isset($soneArr[0]) && $soneArr[0]!='') ? $soneArr[0] : '0.0';
+    $survey_lines['pmt_bhl_survey_direction_1'] = $soneArr[1];
+    
+    $stwoArr = preg_split('/[\s]+/', trim($survey2) );
+    //print_r($stwoArr);
+    $survey_lines['pmt_bhl_survey_feet_2'] = (isset($stwoArr[0]) && $stwoArr[0]!='') ? $stwoArr[0] : '0.0';
+    $survey_lines['pmt_bhl_survey_direction_2'] = $stwoArr[1];
+    
+    return $survey_lines;
+}
+
+function parseSurfaceLocationLeaseLines($surfLocLease1,$surfLocLease2,$surfLocTotAcres){
+    // Eg:
+    // SURFACE LOCATION LEASE LINES:    7455.0 F NORTH                       
+    //                                  4260.0 F WEST                        
+    // TOTAL ACRES:    4681.25                                               
+    
+    //echo 'surfLocLease1:'.$surfLocLease1.'<br>';
+    //echo 'surfLocLease2:'.$surfLocLease2.'<br>';
+    //echo 'surfLocTotAcres:'.$surfLocTotAcres.'<br>';
+    
+    $surf_loc_lease_lines = array();
+    
+    $surfLocLease1 = str_replace('SURFACE LOCATION LEASE LINES:', '', $surfLocLease1);
+    $sloneArr = preg_split('/[\s]+/', trim($surfLocLease1) );
+    //print_r($sloneArr);
+    $surf_loc_lease_lines['pmt_bhl_surface_lease_feet_1'] = (isset($sloneArr[0]) && $sloneArr[0]!='') ? $sloneArr[0] : '0.0';
+    $surf_loc_lease_lines['pmt_bhl_surface_lease_direction_1'] = $sloneArr[1].' '.$sloneArr[2];
+    
+    $sltwoArr = preg_split('/[\s]+/', trim($surfLocLease2) );
+    //print_r($sltwoArr);
+    $surf_loc_lease_lines['pmt_bhl_surface_lease_feet_2'] = (isset($sltwoArr[0]) && $sltwoArr[0]!='') ? $sltwoArr[0] : '0.0';
+    $surf_loc_lease_lines['pmt_bhl_surface_lease_direction_2'] = $sltwoArr[1].' '.$sltwoArr[2];
+    
+    $surfLocTotAcres = str_replace('TOTAL ACRES:', '', $surfLocTotAcres);
+    $surf_loc_lease_lines['pmt_bhl_surface_lease_total_acres'] = (isset($surfLocTotAcres) && trim($surfLocTotAcres)!='') ? trim($surfLocTotAcres) : '0.0';
+    
+    return $surf_loc_lease_lines;
+}
+
+function checkStatusNumber($status_number, $sequence_number, $api_number ){
+    $query = db_select('da_root', 'r');
+    $query->join('da_permit_master', 'p', 'r.root_id = p.root_id');
+    $query->condition('r.status_number', $status_number, '=');
+    $query->condition('r.status_sequence_number', $sequence_number, '=');
+    //$query->condition('p.api_number', $api_number, '=');
+    $query->fields('r',array('root_id'));
+    $query->fields('p',array('permit_master_id'));
+    $query->range(0, 1);
+    $root_id = $query->execute()->fetch();
+    return $root_id;
+}
+
+function get_counties(){
+    $query = db_select('dp_county', 'c');            
+    $query->fields('c');    
+    $query->orderBy('c.county_name');
+    $result = $query->execute()->fetchAll();
+    return $result;
+}
+
+function get_plays(){
+    $query = db_select('dp_play', 'p')
+    ->distinct()
+    ->fields('p', array('id', 'play'))
+    ->groupBy('p.play')
+    ->orderBy('p.play');
+    $result = $query->execute()->fetchAll();
+    return $result;
+}
+
+function get_districts(){
+    $query = db_select('dp_district', 'd');            
+    $query->fields('d');    
+    //$query->orderBy('d.district_name');
+    $result = $query->execute()->fetchAll();
+    return $result;
+}
+
+function get_well_types(){
+    $query = db_select('dp_type_well_codes', 'twc');            
+    $query->fields('twc');    
+    $query->orderBy('twc.code');
+    $result = $query->execute()->fetchAll();
+    return $result;
+}
+
+function get_filling_purposes(){
+    $query = db_select('dp_filling_purpose', 'fp');            
+    $query->fields('fp');    
+    $query->orderBy('fp.code');
+    $result = $query->execute()->fetchAll();
+    return $result;
+}
+
+function get_app_status(){
+    $query = db_select('dp_status_of_app_flag', 'st');            
+    $query->fields('st');    
+    $query->orderBy('st.status_name');    
+    $result = $query->execute()->fetchAll();
+    return $result;
+}
+
+function get_wellbore_profiles(){
+    $query = db_select('dp_wellbore_profile', 'wp');            
+    $query->fields('wp');        
+    $result = $query->execute()->fetchAll();
+    return $result;   
+}
+
+function well_type_flag(){
+    $result = array('Y'=>'Horizontal', 'N'=>'Vertical');
+    return $result;
+}
+
+function dplist() {    
+    $counties = get_counties();
+    $districts = get_districts();
+    $welltypes = get_well_types();
+    $fillingpurposes = get_filling_purposes();  
+    $well_type_flag = well_type_flag();
+    $play_list = get_plays();
+    $qstring = array();
+    if(isset($_GET)){
+        foreach ($_GET as $name => $value){
+            $qstring[$name] = $value;
+        }
+    }    
+    $reports = array('play_list'=>$play_list , 'counties'=>$counties , 'districts'=> $districts, 'welltypes'=>$welltypes , 'fillingpurposes' => $fillingpurposes,
+                    'well_type_flag' => $well_type_flag, 'qstring' => $qstring );     
+    return theme('listing_drilling_permit', $reports);  
+}
+
+function dpmore($api,$status){
+    $listdetails = dblistdetails($api,$status);
+    $reports = array('listdetails' => $listdetails);
+    return theme('drilling_permit_details', $reports);  
+}           
+
+function dpdownload(){    
+    $play_res = array();
+    if ($_GET['play'] != '') {
+        $q2 = db_select('dp_play','p');
+        $q2->fields('p');
+        $q2->condition('p.play', trim($_GET['play']), '=');
+        $play_res = $q2->execute()->fetchAll();
+    }           
+  
+    $query = db_select('da_root', 't1');
+    $query->join("da_permit_master", "t2", "t1.root_id = t2.root_id");
+    $query->join("da_field", "t3", "t2.permit_master_id = t3.permit_master_id");
+    $query->leftJoin("da_field_bottom_hole_location", "t5", "t3.field_id = t5.field_id");
+    $query->join("da_free_form_restrictions", "t8", "t2.permit_master_id = t8.permit_master_id");
+    $query->join("da_gis_surface_location_coordinates", "t14", "t1.root_id = t14.root_id");
+    $query->join("da_gis_bottom_hole_location_coordinates", "t15", "t1.root_id = t15.root_id");
+    $query->leftJoin("dp_district", "district", "t1.district = district.district_code");
+    $query->leftJoin("dp_county", "county", "t1.county_code = county.county_code");
+    $query->leftJoin("dp_status_of_app_flag", "appstatus", "t1.status_of_app_flag = appstatus.status_code");
+    $query->leftJoin("dp_filling_purpose", "fp", "t2.type_application = fp.code");
+    $query->fields('t1', array('root_id', 'lease_name', 'operator_name', 'well_number', 'status_number','da_app_rcvd_date','da_issue_date'))
+            ->fields('t2', array('permit_master_id', 'da_received_date', 'da_pmt_issued_date','final_approved_date',
+                'api_number', 'permit_total_depth', 'type_application', 'directional_well_flag', 'sidetrack_well_flag', 'horizontal_well_flag'))
+            ->fields('t8', array('free_form_restrictions_id', 'free_restr_remark'))
+            ->fields('t14', array('surf_loc_longitude', 'surf_loc_lattitude'))
+            ->fields('t15', array('bottom_hole_longitude', 'bottom_hole_lattitude'))
+            ->fields('district', array('district_name'))
+            ->fields('county', array('county_name'))
+            ->fields('appstatus', array('status_name'))
+            ->fields('fp', array('description'));
+    
+     if ($_GET['play'] != '' && count($play_res)>0 ) { 
+        $play_county = array();
+        $play_district = array();
+
+        foreach($play_res as $prow){       
+            $play_county[] = $prow->county_code;
+            $play_district[] = $prow->district_code;                                         
+        }   
+
+        $query->condition('t1.county_code', $play_county , 'IN');
+        $query->condition('t1.district', $play_district , 'IN');                    
+    } 
+    
+    if ($_GET['show'] != '') {
+        $query->where('t2.final_approved_date >= DATE_SUB(NOW(), INTERVAL ' . $_GET['show'] . ' DAY)');
+    }
+    if (isset($_GET['cty']) && $_GET['cty'] != '') {
+        $query->condition('t1.county_code', trim($_GET['cty']), '=');
+    }
+    if (isset($_GET['op']) && $_GET['op'] != '') {
+        $query->condition('t1.operator_name', trim($_GET['op'] . '%'), 'LIKE');
+    }
+    if (isset($_GET['dis']) && $_GET['dis'] != '') {
+        $query->condition('t1.district', trim($_GET['dis']), '=');
+    }
+    if (isset($_GET['wt1']) && $_GET['wt1'] != '') {
+        $query->condition('t2.horizontal_well_flag', trim($_GET['wt1']), '=');
+    }
+    if (isset($_GET['api']) && $_GET['api'] != '') {
+        $query->condition('t2.api_number', trim($_GET['api']), '=');
+    }
+   
+    if (isset($_GET['fd']) && $_GET['fd'] != '' && isset($_GET['td']) && $_GET['td'] != '') {
+        $from_date = date('Y-m-d', strtotime($_GET['fd']));
+        $to_date = date('Y-m-d', strtotime($_GET['td']));
+        $query->condition('t2.final_approved_date', array($from_date, $to_date), 'BETWEEN');
+    }
+    if (isset($_GET['minr']) && $_GET['minr'] != '' && isset($_GET['maxr']) && $_GET['maxr'] != '') {
+        $query->condition('t2.permit_total_depth', array($_GET['minr'], $_GET['maxr']), 'BETWEEN');
+    }
+    if (isset($_GET['fp']) && $_GET['fp'] != '') {
+        $query->condition('t2.type_application', trim($_GET['fp']), '=');
+    }
+    if (isset($_GET['wt2']) && $_GET['wt2'] != '') {
+        $query->condition('t3.field_application_well_code', trim($_GET['wt2']), '=');
+    }
+    if (isset($_GET['sec']) && $_GET['sec'] != '') {
+        $query->condition('t5.fld_bhl_section', trim($_GET['sec']), '=');
+    }        
+    $query->groupBy('t1.root_id');
+
+   // print_r($query->__toString()); echo '\n'; print_r($query->arguments());
+
+    $result = $query->extend('PagerDefault')->element(0)->limit(20)->execute();
+    $file = 'drilling_permit_'.time().'.doc';
+    ob_start();
+    foreach ($result as $row) {
+        $opname = $row->operator_name ;
+        $apinmu = $row->api_number;
+        $distname = $row->district_name;
+        $leasename = $row->lease_name;
+        $wellnum = $row->well_number;
+        $operatorname =  $row->operator_name;
+        $countname = $row->county_name;
+        $submitted = date('m/d/Y', strtotime($row->da_app_rcvd_date));
+        $approved = date('m/d/Y', strtotime($row->da_issue_date));
+        $des = $row->description;
+        $statusnum = $row->status_number;
+        $totaldep = $row->permit_total_depth;
+        $statusname = $row->status_name;         
+        $amend = ($row->type_application == '06') ? 'Y' : 'N';
+        if ($row->horizontal_well_flag == 'N') {
+            $horizontal_well_flag = 'Vertical';
+        } else {
+            $horizontal_well_flag = 'Horizontal';
+        }
+        echo '<h4>'.$opname.' -<span>'.$submitted.'</span></h4>';
+        echo '<table border="1"> ';        
+        echo '<tr><td class="rowhead">API No.</td><td class="rowhead">District</td><td class="rowhead">Lease</td><td class="rowhead">Well Number</td>
+                          <td class="rowhead">Permitted Operator</td>
+                          <td class="rowhead">County</td><td class="rowhead">Status Date</td><td class="rowhead">Status Number</td><td class="rowhead">Wellbore Profiles</td>
+                          <td class="rowhead">Filling Purpose</td>
+                          <td class="rowhead">Amend</td><td class="rowhead">Total Depth</td><td class="rowhead">Status</td>
+                      </tr>';
+
+          echo "<tr><td>$apinmu</td><td>$distname</td><td>$leasename</td><td> $wellnum</td><td> $operatorname</td><td> $countname</td><td>".nl2br("Submitted:$submitted\nApproved:$approved")."</td><td>$statusnum</td><td>$horizontal_well_flag</td><td> $des</td><td>$amend</td><td>$totaldep</td><td>$statusname</td></tr>";
+        echo '</table>';
+    }
+
+    $content = ob_get_contents();
+    ob_end_clean();
+    header("Expires: 0");
+    header("Last-Modified: " . gmdate("D, d M Y H:i:s") . " GMT");
+    header("Cache-Control: no-store, no-cache, must-revalidate");
+    header("Cache-Control: post-check=0, pre-check=0", false);
+    header("Pragma: no-cache");
+    header('Content-Type: application/msword');
+    header('Content-length: '.strlen($content));
+    header('Content-disposition: attachment; filename='.basename($file));
+    echo $content;
+}
+
+function dblistdetails($api,$status){    
+    $query = db_select('da_root', 't1');            
+    $query->join("da_permit_master", "t2", "t1.root_id = t2.root_id");
+    $query->leftJoin("da_field", "t3", "t2.permit_master_id = t3.permit_master_id");
+    $query->leftJoin("da_field_specific_data", "t4", "t3.field_id = t4.field_id");
+    $query->leftJoin("da_field_bottom_hole_location", "t5", "t3.field_id = t5.field_id");
+    $query->leftJoin("da_canned_restrictions", "t6", "t2.permit_master_id = t6.permit_master_id");
+    $query->leftJoin("da_canned_restriction_fields", "t7", "t6.canned_restrictions_id = t7.canned_restrictions_id");
+    $query->leftJoin("da_free_form_restrictions", "t8", "t2.permit_master_id = t8.permit_master_id");
+    $query->leftJoin("da_bottom_hole_location", "t10", "t2.permit_master_id = t10.permit_master_id");
+    $query->leftJoin("da_alternate_address", "t11", "t2.permit_master_id = t11.permit_master_id");
+    $query->leftJoin("da_permit_remarks", "t12", "t1.root_id = t12.root_id");
+    $query->leftJoin("da_check_register", "t13", "t1.root_id = t13.root_id");
+    $query->leftJoin("da_gis_surface_location_coordinates", "t14", "t1.root_id = t14.root_id");
+    $query->leftJoin("da_gis_bottom_hole_location_coordinates", "t15", "t1.root_id = t15.root_id");
+    $query->leftJoin("dp_district", "district", "t1.district = district.district_code");
+    $query->leftJoin("dp_type_well_codes", "welltype", "t3.field_application_well_code = welltype.code");
+    $query->leftJoin("dp_status_of_app_flag", "appstatus", "t1.status_of_app_flag = appstatus.status_code");    
+    $query->leftJoin("dp_filling_purpose", "fp", "t2.type_application = fp.code");
+    $query->leftJoin("dp_county", "county", "t1.county_code = county.county_code");
+    $query->fields('t1', array('root_id', 'operator_name', 'operator_number', 'status_number', 'lease_name','well_number','district','da_app_rcvd_date','da_issue_date'))
+          ->fields('t2', array('permit_master_id','da_received_date','da_pmt_issued_date','da_pmt_amended_date','final_approved_date', 'api_number', 
+            'permit_total_depth', 'old_surface_location', 'surface_miles_from_city', 'surface_nearest_city', 'surface_survey_feet_1', 
+            'surface_survey_direction_1', 'surface_survey_feet_2', 'surface_survey_dierction_2', 'surface_direction_from_city', 
+            'type_application', 'horizontal_well_flag','sidetrack_well_flag','directional_well_flag',
+            'new_surface_section','new_surface_block','new_surface_survey','new_surface_abstract','new_surface_filler'))
+        ->fields('t3', array('field_id', 'field_number'))
+        ->fields('t4', array('field_specific_data_id'))
+        ->fields('t5', array('field_bottom_hole_location_id', 'fld_bhl_section', 'fld_bhl_block', 'fld_bhl_abstract', 'fld_bhl_survey', 'fld_bhl_acres', 'fld_bhl_pntrt_dist_1', 'fld_bhl_pntrt_dir_1', 'fld_bhl_pntrt_dist_2', 'fld_bhl_pntrt_dir_2'))
+        ->fields('t6', array('canned_restrictions_id'))
+        ->fields('t7', array('canned_restriction_fields_id'))
+        ->fields('t8', array('free_form_restrictions_id', 'free_restr_remark', 'free_restr_type'))
+        ->fields('t10', array('bottom_hole_location_id', 'pmt_bhl_section', 'pmt_bhl_block', 'pmt_bhl_abstract', 'pmt_bhl_survey', 'pmt_bhl_acres', 'pmt_bhl_county', 'pmt_bhl_pntrt_dist_1', 'pmt_bhl_pntrt_dir_1', 'pmt_bhl_pntrt_dist_2', 'pmt_bhl_pntrt_dir_2'))
+        ->fields('t11', array('alternate_address_id'))
+        ->fields('t12', array('permit_remarks_id'))
+        ->fields('t13', array('check_register_id'))
+        ->fields('t14', array('surf_loc_longitude', 'surf_loc_lattitude'))   
+        ->fields('t15', array('bottom_hole_longitude', 'bottom_hole_lattitude'))->fields('district', array('district_name'))
+        ->fields('welltype', array('description'))->fields('appstatus', array('status_name'))->fields('fp', array('description'))
+        ->fields('county', array('county_name'));
+    $query->condition('t1.status_number', trim($status), '=');
+    $query->condition('t2.api_number', trim($api), '=');
+    $query->groupBy('t1.root_id');
+    
+   //print_r($query->__toString()); echo '\n'; print_r($query->arguments());
+   
+    $result = $query->execute()->fetchAll();
+       // print_r($result); exit;
+            
+    return $result;    
+}
+
+function eac_unsubscribe($alert_id){ 
+    if(user_is_logged_in()){
+        global $user;        
+        $aid = base64_decode($alert_id); 
+        
+        $query = db_select('ea_user_alerts', 'ua');
+        $query->condition('ua.alert_id', $aid, '=');
+        $query->condition('ua.uid', $user->uid, '=');        
+        $query->fields('ua',array('alert_name'));        
+        $query->range(0, 1);
+        //print_r($query->__toString()); echo '\n-------------\n'; print_r($query->arguments());  exit;
+        $al_res = $query->execute();         
+        $res = $al_res->fetch();        
+        
+        if( isset($res->alert_name) && $res->alert_name!=''){
+            try{
+                $al_updated = db_update('ea_user_alerts')
+                        ->fields(array(                                
+                            'status' => 0
+                        ))->condition('alert_id', $aid , '=')
+                        ->execute();    
+                drupal_set_message('You alert "'.$res->alert_name.'" has been unsubscribed now.');
+                drupal_goto('eac-edit/'.$aid);
+            } catch (Exception $e){                        
+                $errordata=array('fun_name'=>__FUNCTION__, 'message'=>$e->getMessage());
+                adderrorlog($errordata);
+            }
+        }else{            
+            drupal_set_message('You are not authorized to unsubscribe this alert.','error');
+            drupal_goto('email-alert-config');
+        }
+    }else{
+        //drupal_goto('email-alert-config');
+        $options = array('query' => drupal_get_destination());
+        drupal_set_message('You have to login.','error');
+        drupal_goto('user', $options);
+    }
+}               
+
+// disable settings for inactive users && users that don't have valid subscriptions
+function eac_disable_alert() {
+  // Select inactive user_ids
+  $query = db_select('ea_user_alerts', 'ua');
+  $query->fields('ua');
+
+  $result = $query->execute();
+
+  $user_ids = array();
+
+  foreach ($result as $user) {
+    $account = user_load($user->uid);
+
+    if ($account->status == 0) {
+      $user_ids[] = $user->uid;
+    } else {
+      $subscriptions = hart_user_get_subscriptions($account, TRUE);
+      $access = FALSE;
+      // Iterate the active subscriptions
+      foreach ($subscriptions['active'] as $code => $subscription) {
+          switch ($code) {
+            // Check for subscriptions that always grant access to all content
+            case 'UGG-IPSL':
+            case 'UGG':
+            case 'UGG-TRIAL':
+              $access = TRUE;
+          }
+      }
+
+      if ($access === FALSE) $user_ids[] = $user->uid;
+    }
+  }
+
+
+  $query = db_select('ea_user_alerts', 'ua');
+  $query->fields('ua');
+  $query->condition('ua.uid', $user_ids, 'IN');
+  
+  $result = $query->execute();
+  foreach ($result as $alert) {
+    $alert_id = $alert->alert_id;
+
+    // change status to 0 
+    $al_updated = db_update('ea_user_alerts')
+                        ->fields(array(                                
+                            'status' => 0
+                        ))->condition('alert_id', $alert_id , '=')
+                        ->execute(); 
+  }   
+}

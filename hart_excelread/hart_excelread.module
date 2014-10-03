@@ -1,0 +1,1054 @@
+<?php
+/**
+ * @file
+ *  Hart specific customization for share bar, email, print
+ */
+
+// Define the default view mode for emails
+//define('HART_SHARE_DEFAULT_EMAIL_VIEW_MODE', 'full');
+
+/**
+ * Implements hook_menu().
+ */
+function hart_excelread_menu() {
+  $items = array();  
+//  $items['hartexread'] = array(
+//    'title' => 'Hart Excel Reader',
+//    'page callback' => 'readexc',
+//    //'page arguments' => array(),
+//    'access arguments' => array('access content'),
+//    //'type' => MENU_NORMAL_ITEM,	
+//    'file' => 'hart_excelread.inc' 
+//  );  
+  
+  $items['oa-upload'] = array(
+    'title' => 'Operator Assets File upload',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('upload_form'),
+    'access arguments' => array('access operator data upload'),    
+    'type' => MENU_CALLBACK,
+    'file' => 'hart_excelread.inc',    
+   ); 
+  
+  $items['operator-assets'] = array(
+      'title' => 'Operator Assets',
+      'page callback' => 'op_assets',      
+      //'access arguments' => array('access operator assets view'),    
+      //'access callback' => TRUE,
+      'access callback' => 'hart_excelread_check_domain_and_role',
+      'type' => MENU_CALLBACK
+  ); 
+  
+  return $items;
+}
+
+
+/**
+ * Implements hook_permission().
+ */
+function hart_excelread_permission() {
+  return array(
+    'access operator data upload' => array(
+      'title' => t('Access Operator Data upload (Excel)'),
+      'description' => t('Allow to upload Operator Data file'),
+    /*
+    ),
+    'access operator assets view' => array(
+      'title' => t('Access Operator Assets data view screen'),
+      'description' => t('Allow to view the operator assets data')
+    */
+    )  
+  );
+}
+
+
+// Check domain & role for access
+function hart_excelread_check_domain_and_role() {
+  global $user;
+  
+  $base_url = $GLOBALS['base_url'];
+  if (strpos($base_url, 'ugcenter') !== FALSE) { // there is ugcenter in the domain
+    if (in_array('administrator', array_values($user->roles)) || in_array('administrator', array_values($user->roles))) return TRUE; // if user is admin/ editor
+  }
+  return FALSE;
+}
+
+function str_utf_conversion($string){    
+    $utf_string = '';
+    $utf_string = mb_check_encoding($string, 'UTF-8') ? $string : utf8_encode($string);    
+    return $utf_string;
+}
+
+function upload_form($form, &$form_state) {
+    $form['file'] = array(
+      '#type' => 'file',
+      '#title' => t('Upload Operator Data Excel File'),
+      '#prefix' => '<div class="upload_form">',
+      '#suffix' => '</div>',
+      '#description' => t(''),	
+    );
+    $form['fid'] = array(
+      '#type' => 'hidden',
+      '#value' => '' ,    
+    );
+    $form['submit'] = array(
+      '#prefix' => '<div class="upload_submit">',
+      '#type' => 'submit',
+      '#value' => t('Upload'),
+      '#suffix' => '</div>',
+    );
+    if (isset($form_state['table'])) {
+        $form['table'] = $form_state['table'];
+    }
+    return $form;
+}
+
+
+function upload_form_validate($form, &$form_state) {      
+    $file = file_save_upload('file', array('file_validate_extensions' => array('xls')), 
+                                    'public://' . variable_get('file', '').'/oa_import', 
+                                    FILE_EXISTS_RENAME);
+    if ($file) {
+      $fid = $file->fid;
+      $doc_url = file_create_url($file->uri);
+      //Set the status of the uploaded file.
+      $file->status = FILE_STATUS_PERMANENT;
+      file_save($file);
+      
+      //print_r($file); exit;
+      $response = readexc($file);
+      
+      if(is_numeric($response)){
+          $form_state['values']['fid']=$response;
+          drupal_set_message(t('The operator data is saved.'));          
+      }else if($response=='file_not_exist'){
+          drupal_set_message(t('File '.$file->filename.' does not exists.'), 'error');
+      }
+      
+    }else if(!$file) {
+      drupal_set_message(t('Please upload Operator Data Excel file.'), 'error');
+    }
+}
+
+function upload_form_submit($form, &$form_state) {  
+    $fid = $form_state['values']['fid'];
+    $form_state['table'] = projects_list($fid);
+    $form_state['rebuild'] = TRUE;      
+}
+
+/**
+ * menu callback.
+ */
+function readexc($uploadFile) {     
+    $profile_path = drupal_get_path('profile', 'hart_energy');
+    $libPath = $profile_path.'/libraries/PHPExcel';
+    
+    //$fileName = 'Operator-assets-July-2014.xls';   
+    
+    $fileName = $uploadFile->filename;    
+    $filesPath = variable_get('file_public_path', conf_path() . '/files');    
+    //$file_dir = $filesPath;     
+    $file_dir = $filesPath.'/oa_import';     
+    $processtime = date("Y-m-d H:i:s");          
+        
+    if (file_exists( $file_dir . '/' . $fileName )) {
+        
+            $mod_time =  date("Y-m-d H:i:s", filemtime( $file_dir . '/' . $fileName ));       
+            
+            $file_id = add_processing_fileinfo($fileName, $mod_time, $processtime);    
+            
+            // PHPExcel file load 1
+            require_once $libPath .'/Classes/PHPExcel.php';
+            
+            // Cell cache BEGINS
+            $cacheMethod = PHPExcel_CachedObjectStorageFactory:: cache_to_phpTemp;
+            $cacheSettings = array( 'memoryCacheSize' => '8MB');
+            PHPExcel_Settings::setCacheStorageMethod($cacheMethod, $cacheSettings);
+            // Cell cache ENDS
+
+            $inputFileType = PHPExcel_IOFactory::identify( $file_dir . '/' . $fileName );
+            $objReader = PHPExcel_IOFactory::createReader($inputFileType);  
+            $objReader->setReadDataOnly(null,true,true,true);                        
+            $objPHPExcel = $objReader->load( $file_dir .'/'. $fileName );
+            // PHPExcel file load 1 ENDS
+            
+            // PHPExcel file load 2
+            //require_once $libPath .'/Classes/PHPExcel/IOFactory.php';
+            //$objPHPExcel = PHPExcel_IOFactory::load($file_dir .'/'. $fileName);
+            // PHPExcel file load 2 ENDS
+            
+    //  Testing individual data    
+    //  echo $cellval = $objPHPExcel->getSheet(1)->getCell('J33')->getValue();     
+    //  exit;       
+    //    echo '\n';
+    //    if($objPHPExcel->getSheet(1)->getCell('F11')->getHyperlink()->getUrl()!=''){
+    //        echo $objPHPExcel->getSheet(1)->getCell('F11')->getHyperlink()->getUrl();
+    //    }
+    //    exit;
+        // Testing individual data ENDS
+            db_query('SET foreign_key_checks=0'); 
+            foreach ($objPHPExcel->getWorksheetIterator() as $worksheet) {
+
+                $worksheetTitle     = $worksheet->getTitle();
+
+                //echo $worksheetTitle.'\n';
+//                $ws = array('Companies');
+//                if(in_array($worksheetTitle, $ws)){            
+//                    continue;
+//                }
+
+
+                $highestRow         = $worksheet->getHighestRow(); // e.g. 10
+                $highestColumn      = $worksheet->getHighestColumn(); // e.g 'F'
+                $highestColumnIndex = PHPExcel_Cell::columnIndexFromString($highestColumn);                
+                $nrColumns = ord($highestColumn) - 64;
+                
+                
+                
+                //echo '$highestRow:'.$highestRow;
+
+        //        echo "\nThe worksheet <strong>".$worksheetTitle."</strong> has ";
+        //        echo $nrColumns . ' columns (A-' . $highestColumn . ') ';
+        //        echo ' and ' . $highestRow . ' row.';   
+        //
+        //        $startRow=1;
+        //        $startCol=0;    
+        //        echo '\nData: <table border="1"><tr>';
+        //        for ($row = $startRow; $row <= $highestRow; ++ $row) {
+        //            echo '<tr>';
+        //            for ($col = $startCol; $col < $highestColumnIndex; ++ $col) {
+        //                $cell = $worksheet->getCellByColumnAndRow($col, $row);
+        //                $val = $cell->getValue();
+        //                $dataType = PHPExcel_Cell_DataType::dataTypeForValue($val);
+        //                echo '<td>' . $val . '\n(Typ ' . $dataType . ')</td>';
+        //            }
+        //            echo '</tr>';
+        //        }
+        //        echo '</table>';
+
+
+
+                if($worksheetTitle=='Contents'){
+                    continue;
+        //            $playflag=true;
+        //            
+        //            // 10th Row is starting point for Play values      
+        //            for ($row = 10; $row <= $highestRow; ++ $row) {                 
+        //                $cell = $worksheet->getCellByColumnAndRow(1, $row);
+        //                $val = $cell->getValue();
+        //                $dataType = PHPExcel_Cell_DataType::dataTypeForValue($val);
+        //                if($dataType!='null' && $playflag){
+        //                    addPlay($val);
+        //                }                
+        //            }        
+
+                }else if($worksheetTitle=='Companies'){ 
+                    $companyflag = true;
+
+                    // Column title row BEGINS
+                    $comp_col_index = array();
+                    $comp_col_mapping = array();
+
+                    $ar_col_index = 0;      // Annual Report Column Index
+                    $qr_col_index = 0;      // Quarterly Report Column Index
+                    $pr_col_index = 0;      // Presentation Column Index
+
+                    // Capex 2012 Column Index
+                    $capex_col_index = array();     
+                    $capex_title_data = array();   
+
+                    // EBIDAX 2012 Column Index
+                    $ebidax_col_index = array();     
+                    $ebidax_title_data = array();
+
+                    $cdc = company_data_columns();
+
+                    // All Title Column Index
+                    $colindex = array();    
+
+                    $comp_highest_col_index = 0;
+
+                    // 7th Row is fixed for Column Title
+                    foreach($worksheet->getRowIterator(7) as $row){                 
+                        foreach($row->getCellIterator() as $key => $cell)
+                        {
+                            if($key>0){
+
+                                $col_title_val = trim($cell->getValue());
+                                $colTitle = str_utf_conversion($col_title_val);
+
+                                if( $colTitle=='Annual Report'){
+                                    $ar_col_index = $key;
+                                }else if( $colTitle=='Quarterly Report'){
+                                    $qr_col_index = $key;
+                                }else if( $colTitle=='Presentation'){
+                                    $pr_col_index = $key;
+                                }else if( preg_match('~^(Capex){1}[\s]*([\d]{4})(E?)$~i',$colTitle,$capexMatch) ){                            
+                                    $capex_col_index[] = $key;  
+                                    $capex_title_data[$key] = array('year' => $capexMatch[2] , 'estimated' => 0);
+                                    if( isset($capexMatch[3]) && $capexMatch[3]=='E'){
+                                        $capex_title_data[$key]['estimated'] = 1;
+                                    }                            
+                                }else if( preg_match('~^(EBIDAX){1}[\s]*([\d]{4})(E?)$~i',$colTitle,$ebidaxMatch) ){                            
+                                    $ebidax_col_index[] = $key;                            
+                                    $ebidax_title_data[$key] = array('year' => $ebidaxMatch[2] , 'estimated' => 0);
+                                    if( isset($ebidaxMatch[3]) && $ebidaxMatch[3]=='E'){
+                                        $ebidax_title_data[$key]['estimated'] = 1;
+                                    }
+                                }else{      // Other company data
+                                    $comp_col_index[] = $key;
+
+                                    $comp_field = array_search($colTitle, $cdc);                            
+                                    $comp_col_mapping[$key] = array('table_field' => $comp_field , 'xls_col_title' => $colTitle);
+                                }
+
+                                $colindex[$key] = $colTitle;
+
+                                if( trim($colTitle)=='Other' ){
+                                    $comp_highest_col_index = $key;                        
+                                    break;
+                                }
+                            }
+
+                        }  
+                        break;            
+                    }
+
+        //            print_r($capex_col_index); echo '\n'; print_r($capexE_col_index); echo '\n';
+        //            print_r($ebidax_col_index); echo '\n'; print_r($ebidaxE_col_index); echo '\n';
+        //            echo 'annual_report_col_index:'.$ar_col_index; echo '\n';  echo 'quarter_report_col_index:'.$qr_col_index; echo '\n';
+        //            echo 'presentation_col_index:'.$pr_col_index; echo '\n';
+        //            print_r($comp_col_index); print_r($comp_col_mapping);    print_r($capex_title_data);   print_r($colindex);
+        //             exit;
+                    // Column title row ENDS
+
+
+                    if($comp_highest_col_index){
+                        // 8th Row is starting point for Companies tab values 
+                        for ($row = 8; $row <= $highestRow; ++ $row) {                          
+
+                            $company_info = array( 'company_name' => '', 'ticker' =>'' , 'exchange' => '', 'next_report' => '',
+                                'website_text' =>'', 'website_url' => '' ,'updated_on' =>'',
+                                'production' =>'','acreage' =>'','reserves' =>'',
+                                'wells_drilled' =>'','other_comments' =>'' , 'latest_presentation_text' => '', 'latest_presentaion_url' => '' );
+
+                            $annual_report = array('text'=>'' , 'year' => '', 'report_url' => '');
+                            $quarter_report = array('text'=>'' , 'quarter_code' => '', 'year' => '', 'quarter_report_url' => '' , 'presentation_text' => '', 'presentation_url'=>'');                    
+                            $cabex_data = $ebidax_data = array();
+
+                            for ($col = 1; $col <= $comp_highest_col_index; ++ $col) {
+                                $cell = $worksheet->getCellByColumnAndRow($col, $row);
+                                $cell_val = trim($cell->getValue());
+                                $val = str_utf_conversion($cell_val);
+                                //echo '('.$row.','.$col.'):'.$val.'\n';
+                                //$dataType = PHPExcel_Cell_DataType::dataTypeForValue($val);
+
+                                if( in_array($col, $comp_col_index) ){  // Company Data
+
+                                    $table_field = $comp_col_mapping[$col]['table_field'];
+                                    if($table_field=='website_text'){                                
+                                        if( preg_match('~^=HYPERLINK\("~i',$val ) ){
+                                            preg_match_all('`"([^"]*)"`', $val, $webres);
+                                            if(is_array($webres) && count($webres)>0){
+                                                $company_info[$table_field] = $webres[1][1];
+                                                $company_info['website_url'] = $webres[1][0];
+                                            }
+                                        }else{                                
+                                            $company_info[$table_field] = $val;
+                                            $company_info['website_url'] = $cell->getHyperlink()->getUrl();
+                                        }
+                                    }else if($table_field == 'updated_on'){
+                                        $updated_date = NULL;
+                                        if($val!=''){
+                                            if(preg_match('/^([\d]){1,2}\/([\d]){1,2}\/([\d]){2,4}$/',$val)){
+                                                $updated_date = date('Y-m-d',strtotime($val));
+                                            }else if(preg_match('/^[a-zA-Z\s]+/',$val)){
+                                                $updated_date = date('Y-m-d',strtotime($val) );
+                                            }else{
+                                                //echo 'updated\n';
+                                                $up_obj = (array)PHPExcel_Shared_Date::ExcelToPHPObject($val);
+                                                //print_r($up_obj);
+                                                //echo $up_obj->date;
+                                                //$up_date = (array)$up_obj;
+                                                //print_r($up_date);
+                                                $updated_date = date('Y-m-d',strtotime($up_obj['date']) );    // Reading Excel Date format    
+                                                //echo '$updated_date:'.$updated_date.'\n';
+                                            }
+                                        }
+                                        $company_info[$table_field] = $updated_date;
+                                    }else{
+                                        $company_info[$table_field] = $val;
+                                    }
+
+                                }else if($ar_col_index == $col){    // Annual Report
+                                    $annual_report['text'] = $val;
+                                    $annual_report['year'] = $val;
+                                    $annual_report['report_url'] = $cell->getHyperlink()->getUrl();
+                                }else if($qr_col_index == $col){    // Quarterly Report
+                                    $quarter_report['text'] = $val;
+                                    $quarter_report['quarter_report_url'] = $cell->getHyperlink()->getUrl();
+                                }else if($pr_col_index == $col){    // Presentation      
+                                    $presentation_date='';
+                                    if($val!=''){
+                                        if(preg_match('/^[a-zA-Z\s]+/',$val)){
+                                            $presentation_date = date('Y-m-d',strtotime($val) );       // Not date formatted
+                                        }else{
+                                            //echo 'present\n';
+                                            $pd_obj = (array)PHPExcel_Shared_Date::ExcelToPHPObject($val);
+                                            //print_r($pd_obj);
+                                            $presentation_date = date('Y-m-d',strtotime($pd_obj['date']));    // Reading Excel Date format
+                                            //echo '$presentation_date:'.$presentation_date.'\n';
+                                        }                                        
+                                        $quarter_report['presentation_text'] = $presentation_date;
+                                        $quarter_report['presentation_url'] = $cell->getHyperlink()->getUrl();
+                                        $company_info['latest_presentation_text'] = $presentation_date;
+                                        $company_info['latest_presentaion_url'] = $quarter_report['presentation_url'];
+                                    }
+                                }else if( in_array($col, $capex_col_index) ){   // Cabex
+                                    $capex_title_data[$col]['capex'] = $val;
+                                    $cabex_data[] = $capex_title_data[$col];
+                                }else if( in_array($col, $ebidax_col_index) ){  // EBIDAX
+                                    $ebidax_title_data[$col]['ebidax'] = $val;
+                                    $ebidax_data[] = $ebidax_title_data[$col];
+                                }                        
+                            }
+
+                            //print_r($company_info); exit;   //print_r($cabex_data); exit;
+
+                            // Value Insertion                    
+                            if(isset($company_info['company_name']) && $company_info['company_name']!='' && $companyflag){
+                                //print_r($company_info); exit;
+                                
+                                $company = getCompanyByName($company_info['company_name']);
+                                
+                                if($company){   // Update
+                                    
+                                    $company_id = $company->company_id;
+                                    updateCompany($company_info, $company_id, $worksheetTitle, $row,$file_id);
+                                    
+                                    // Annual Report Data
+                                    if( preg_match('~^[\d]{4}$~', $annual_report['text'])){  
+                                        $car = getCompanyAnnualReport($company_id, $annual_report['year']);
+                                        if($car){
+                                            updateCompanyAnnualReport($annual_report, $company_id);
+                                        }else{
+                                            addCompanyAnnualReport($annual_report,$company_id);
+                                        }
+                                    }else if($annual_report['text']!=''){
+                                        $logData = array('fid' => $file_id,'sheet_title' => $worksheetTitle,'sheet_column' => '',
+                                                        'sheet_row' => $row, 'message' => 'INVALID ANNUAL REPORT DATA');
+                                        addLogData($logData);
+                                    }
+                                    
+                                    // Quarter Report Data 
+                                    if( preg_match('~^([1-4]{1}Q)([\d]{4})$~', $quarter_report['text'] , $qrMatches) ){                      
+                                        $quarter_report['quarter_code'] = $qrMatches[1];
+                                        $quarter_report['year'] = $qrMatches[2]; 
+                                        
+                                        $cqr = getCompanyQuarterReport($company_id, $quarter_report['year'], $quarter_report['quarter_code']);
+                                        if($cqr){
+                                            updateCompanyQuarterReport($quarter_report,$company_id,$quarter_report['year'], $quarter_report['quarter_code']);
+                                        }else{                                        
+                                            addCompanyQuarterReport($quarter_report,$company_id);
+                                        }    
+                                    }else if($quarter_report['text']!=''){
+                                        $logData = array('fid' => $file_id,'sheet_title' => $worksheetTitle,'sheet_column' => '',
+                                                        'sheet_row' => $row, 'message' => 'INVALID QUARTER REPORT DATA');
+                                        addLogData($logData);
+                                    }
+                                    
+                                    // Cabex Data
+                                    if(count($cabex_data)>0){
+                                        foreach($cabex_data as $capdata){                                            
+                                            $cac = getCompanyAnnualCapex($company_id, $capdata['year']);
+                                            if($cac){
+                                                updateCompanyAnnualCapex($capdata, $company_id, $capdata['year']);
+                                            }else{                                            
+                                                addCompanyAnnualCapex($capdata, $company_id);
+                                            }    
+                                        }
+                                    }
+                                    
+                                    // Ebidax data
+                                    if(count($ebidax_data)>0){
+                                        foreach($ebidax_data as $ebidata){
+                                            $cae = getCompanyAnnualEbidax($company_id, $ebidata['year']);
+                                            if($cae){
+                                                updateCompanyAnnualEbidax($ebidata, $company_id, $ebidata['year']);
+                                            }else{                                            
+                                                addCompanyAnnualEbidax($ebidata, $company_id);
+                                            }                                            
+                                        }
+                                    }                                    
+                                    
+                                }else{  // Add
+                                    
+                                    $company_id = addCompany($company_info,$worksheetTitle,$row,$file_id);
+                                    
+                                    if($company_id){
+                                        
+                                        // Annual Report Data
+                                        if( preg_match('~^[\d]{4}$~', $annual_report['text'])){          
+                                            addCompanyAnnualReport($annual_report,$company_id);
+                                        }else if($annual_report['text']!=''){
+                                            $logData = array('fid' => $file_id,'sheet_title' => $worksheetTitle,'sheet_column' => '',
+                                                            'sheet_row' => $row, 'message' => 'INVALID ANNUAL REPORT DATA');
+                                            addLogData($logData);
+                                        }
+                                        
+                                        // Quarter Report Data 
+                                        if( preg_match('~^([1-4]{1}Q)([\d]{4})$~', $quarter_report['text'] , $qrMatches) ){                      
+                                            $quarter_report['quarter_code'] = $qrMatches[1];
+                                            $quarter_report['year'] = $qrMatches[2]; 
+                                            addCompanyQuarterReport($quarter_report,$company_id);
+                                        }else if($quarter_report['text']!=''){
+                                            $logData = array('fid' => $file_id,'sheet_title' => $worksheetTitle,'sheet_column' => '',
+                                                            'sheet_row' => $row, 'message' => 'INVALID QUARTER REPORT DATA');
+                                            addLogData($logData);
+                                        }
+                                        
+                                        // Cabex Data
+                                        if(count($cabex_data)>0){
+                                            foreach($cabex_data as $capdata){
+                                                addCompanyAnnualCapex($capdata, $company_id);
+                                            }
+                                        }
+                                        
+                                        // Ebidax data
+                                        if(count($ebidax_data)>0){
+                                            foreach($ebidax_data as $ebidata){
+                                                addCompanyAnnualEbidax($ebidata, $company_id);
+                                            }
+                                        }
+                                    } 
+                                    
+                                }
+                                
+                            }
+                            // Value Insertion ENDS //////////////
+
+                        }
+                    }
+
+
+
+                }else{  // Regions      
+                    //echo $worksheetTitle.'\n';
+                    $regionflag = true;
+
+                    $play_col_index = 0;
+                    $company_col_index = 0;
+                    $comment_col_index = 0;
+                    // Capex 2012 Column Index
+                    $capex_col_index = $capex_title_data = array();   
+                    // 2012 Wells Column Index
+                    $wells_col_index = $wells_title_data = array(); 
+                    // 2012 Production Column Index
+                    $production_col_index = $production_title_data = array();
+                    $comp_play_col_index = $comp_play_col_mapping = array();
+
+                    $cpdc = company_play_data_columns();
+                    $colindex = array();    // All Title Column Index
+                    $cp_highest_col_index = 0;
+
+                    $start_row_err = false;
+
+                    // 8th Row is fixed for Column Title 
+                    foreach($worksheet->getRowIterator(8) as $row){                 
+                        foreach($row->getCellIterator() as $key => $cell)
+                        {
+                            //echo '$key:'.$key.'\n';
+                            if($key>0){
+
+                                $col_title_val = trim($cell->getValue());
+                                $colTitle = str_utf_conversion($col_title_val);
+
+                                //echo $key.' : '.$colTitle.'\n';
+                                if($key==1 && $colTitle!='Play'){                            
+                                    $start_row_err = true;
+                                    break;
+                                }
+
+                                if($colTitle == 'Play'){
+                                    $play_col_index = $key;
+                                }else if($colTitle == 'Operator'){
+                                    $company_col_index = $key;
+                                }else if( preg_match('~^(Capex){1}[\s]*([\d]{4})(E?)$~i',$colTitle,$capexMatch) ){                            
+                                    $capex_col_index[] = $key;  
+                                    $capex_title_data[$key] = array('year' => $capexMatch[2] , 'estimated' => 0);
+                                    if( isset($capexMatch[3]) && $capexMatch[3]=='E'){
+                                        $capex_title_data[$key]['estimated'] = 1;
+                                    }                            
+                                }else if( preg_match('~^([\d]{4})(E?)[\s]*(Wells){1}$~i',$colTitle,$wellsMatch) ){                            
+                                    $wells_col_index[] = $key;  
+                                    $wells_title_data[$key] = array('year' => $wellsMatch[1] , 'estimated' => 0);
+                                    if( isset($wellsMatch[2]) && $wellsMatch[2]=='E'){
+                                        $wells_title_data[$key]['estimated'] = 1;
+                                    }                            
+                                }else if( preg_match('~^([\d]{4})(E?)[\s]*(Production){1}$~i',$colTitle,$prodMatch) ){                            
+                                    $production_col_index[] = $key;  
+                                    $production_title_data[$key] = array('year' => $prodMatch[1] , 'estimated' => 0);
+                                    if( isset($prodMatch[2]) && $prodMatch[2]=='E'){
+                                        $production_title_data[$key]['estimated'] = 1;
+                                    }                            
+                                }else{      // Other company data
+                                    $comp_play_col_index[] = $key;                            
+                                    $comp_play_field = array_search($colTitle, $cpdc);                            
+                                    $comp_play_col_mapping[$key] = array('table_field' => $comp_play_field , 'xls_col_title' => $colTitle);
+                                }                        
+
+                                $colindex[$key] = $colTitle;                        
+                                if( trim($colTitle)=='COMMENTS' ){
+                                    $comment_col_index = $key;
+                                    $cp_highest_col_index = $key;                        
+                                    break;
+                                }
+                            }
+
+                        }  
+                        break;            
+                    }
+
+        //            print_r($capex_col_index); echo '\n';   print_r($wells_col_index); echo '\n';    print_r($production_col_index); echo '\n';
+        //            print_r($comp_play_col_index); echo '\n'; print_r($colindex); 
+
+
+                    if(!array_key_exists(1, $colindex)){
+                        $start_row_err = true;
+                    }else if( array_key_exists(1, $colindex) && $colindex[1]!='Play'){
+                        $start_row_err = true;
+                    }          
+
+                    if($start_row_err){
+                        //echo __LINE__.'\n';
+                        $logData = array('fid' => $file_id,'sheet_title' => $worksheetTitle,'sheet_column' => '',
+                                                    'sheet_row' => '', 'message' => 'INVALID START ROW' );
+                        addLogData($logData);
+                        continue;                
+                    }
+
+                    if($cp_highest_col_index && !$start_row_err){                        
+                        
+                        $how_many_null_rows = 0;
+                        
+                        // 9th Row is starting point for Regions tab values 
+                        for ($row = 9; $row <= $highestRow; ++ $row) {                          
+
+                            $company_play_info = array( 'location' => '' , 'project_field' => '', 'entered_play' => '', 'depth' => '', 
+                                'acres_gross_net' => '', 'jvs'=> '', 'well_cost'=> '','most_recent_quarter' => '',
+                                'number_of_rigs'=> '','well_spacing'=> '', 'inventory'=> '','completions'=> '',        
+                                'ip'=> '', 'eur'=> '','total_prod_wells'=> '','reserves'=> '','resource_potential'=> '',
+                                'comment'=> ''
+                            );      
+                            $play_name = $company_name = '';
+                            $cp_ids = array('company_id' => '' , 'play_id' => '');                    
+                            $cabex_data = $wells_data = $production_data = array();
+
+                            for ($col = 1; $col <= $cp_highest_col_index; ++ $col) {
+                                $cell = $worksheet->getCellByColumnAndRow($col, $row);
+                                $cell_val = trim($cell->getValue());
+                                $val = str_utf_conversion($cell_val);
+                                //echo '('.$row.','.$col.'):'.$val.'\n';
+                                //$dataType = PHPExcel_Cell_DataType::dataTypeForValue($val);                        
+                                if($play_col_index == $col){                                        // Play                     
+                                    $play_name = $val;                            
+                                }else if($company_col_index == $col){                               // Operator/Company
+                                    $company_name = $val;                            
+                                }else if($comment_col_index == $col){                               // COMMENTS
+                                    $table_field = $comp_play_col_mapping[$col]['table_field'];                            
+                                    $company_play_info[$table_field] = $val;
+                                }else if( in_array($col, $comp_play_col_index) ){                  // Company Play Data
+                                    $table_field = $comp_play_col_mapping[$col]['table_field'];                            
+                                    $company_play_info[$table_field] = $val;
+                                }else if( in_array($col, $capex_col_index) ){                       // Cabex
+                                    $capex_title_data[$col]['capex'] = $val;
+                                    $cabex_data[] = $capex_title_data[$col];
+                                }else if( in_array($col, $wells_col_index) ){                       // Wells
+                                    $wells_title_data[$col]['well'] = $val;
+                                    $wells_data[] = $wells_title_data[$col];
+                                }else if( in_array($col, $production_col_index) ){                  // Production
+                                    $production_title_data[$col]['production'] = $val;
+                                    $production_data[] = $production_title_data[$col];
+                                }                        
+                            }
+
+            //                print_r($cp_ids); echo '\n'; print_r($company_play_info); echo '\n';
+            //                print_r($cabex_data);   echo '\n';      print_r($wells_data); echo '\n';  print_r($production_data); echo '\n';
+            //                exit;
+
+
+                            // To Skip the sheet check continuous 5 Null Rows
+                            if( $company_name=='' && $play_name=='' ){
+                                $how_many_null_rows=$how_many_null_rows+1;                                
+                                if($how_many_null_rows>5){                                
+                                    break;
+                                }else{
+                                    continue;
+                                }
+                            }
+                            
+                            // Throw Error if any Row is Null IN BETWEEN
+                            if($how_many_null_rows>0 && $how_many_null_rows<5){
+                                $logData = array('fid' => $file_id,'sheet_title' => $worksheetTitle,'sheet_column' => '1-'.$col,
+                                                            'sheet_row' => ($row-1), 'message' => 'INVALID COMPANY PLAY :- NULL Row' );
+                                addLogData($logData);
+                                $how_many_null_rows = 0;
+                            }
+
+                            if($play_name!=''){
+                                $play = getPlayByName($play_name);
+                                if(!$play){
+                                    $cp_ids['play_id'] = addPlay($play_name);                                
+                                }else{
+                                    $cp_ids['play_id'] = $play->play_id;
+                                }
+                            }
+
+                            if($company_name!=''){
+                                $company = getCompanyByName($company_name);
+                                if($company){
+                                    $cp_ids['company_id'] = $company->company_id;
+                                }
+                            }
+                           
+                            // Value Insertion    
+                            
+                            if($regionflag){
+                                $cpd = getCompanyPlayDetails($company_name, $play_name, $company_play_info['location'], $company_play_info['project_field']);
+                                
+                                if(!$cpd){  // Add                               
+                                
+                                    //echo 'ADD\n';                                    
+                                    
+                                    if( $cp_ids['company_id']!='' && $cp_ids['play_id']!=''){
+                                        $cp = getCompanyPlayId($cp_ids['company_id'],$cp_ids['play_id']);
+                                        if($cp){
+                                            $company_play_id = $cp->company_play_id;
+                                        }else{                                         
+                                            $company_play_id = addCompanyPlay($cp_ids['company_id'],$cp_ids['play_id']);
+                                        }
+
+                                        if($company_play_id){                                            
+                                            $cpd_id = '';
+                                            if(count($company_play_info)>0){                                                
+                                                $cpd_id = addCompanyPlayDetails($company_play_info, $company_play_id,$worksheetTitle,$row,$file_id);
+                                            }                                                 
+
+                                            // Company Play Cabex
+                                            if(count($cabex_data)>0 && $cpd_id!=''){
+                                                foreach($cabex_data as $capdata){
+                                                    addCompanyPlayAnnualCapex($capdata, $company_play_id, $cpd_id);
+                                                }
+                                            }
+
+                                            // Company Play Wells
+                                            if(count($wells_data)>0 && $cpd_id!=''){
+                                                foreach($wells_data as $welldata){
+                                                    addCompanyPlayAnnualWells($welldata, $company_play_id, $cpd_id);
+                                                }
+                                            }
+
+                                            // Company Play Production
+                                            if(count($production_data)>0 && $cpd_id!=''){
+                                                foreach($production_data as $prod_data){
+                                                    addCompanyPlayAnnualProduction($prod_data, $company_play_id, $cpd_id);
+                                                }
+                                            }
+
+                                        }
+                                    }else if( $cp_ids['company_id']!='' && $cp_ids['play_id']=='' ){
+                                        $msg = generateLogMessage($play_name,$company_name,$company_play_info,$cabex_data,$wells_data,$production_data);                        
+                                        $logData = array('fid' => $file_id,'sheet_title' => $worksheetTitle,'sheet_column' => '1-'.$col,
+                                                            'sheet_row' => $row, 'message' => 'PLAY NOT EXISTS :- '.$msg );
+                                        addLogData($logData);
+                                    }else if( $cp_ids['company_id']=='' && $cp_ids['play_id']!='' ){
+                                        $msg = generateLogMessage($play_name,$company_name,$company_play_info,$cabex_data,$wells_data,$production_data);
+
+                                        $logData = array('fid' => $file_id,'sheet_title' => $worksheetTitle,'sheet_column' => '1-'.$col,
+                                                            'sheet_row' => $row, 'message' => 'COMPANY NOT EXISTS :- '.$msg );
+                                        addLogData($logData);
+                                    }else if( ($company_name!='' && $play_name!='') && $cp_ids['company_id']=='' && $cp_ids['play_id']=='' ){
+                                        $msg = generateLogMessage($play_name,$company_name,$company_play_info,$cabex_data,$wells_data,$production_data);
+                                        $logData = array('fid' => $file_id,'sheet_title' => $worksheetTitle,'sheet_column' => '1-'.$col,
+                                                            'sheet_row' => $row, 'message' => 'INVALID COMPANY PLAY :- '.$msg );
+                                        addLogData($logData);
+
+                                    }else if( $company_name=='' && $play_name=='' ){
+                                        continue;
+                                    }
+                                
+                                
+                                }else{  // Update
+                                    
+                                    //echo 'UPDATE\n';
+                                    //continue;
+                                    
+                                    $cpd_id = $cpd->cpd_id;     // Company Play Details Id
+                                    $company_play_id = $cpd->company_play_id;
+                                    
+                                    if(count($company_play_info)>0 && $cpd_id){
+                                        updateCompanyPlayDetails($company_play_info, $cpd_id, $worksheetTitle, $row, $file_id);
+                                    }
+                                    
+                                    // Company Play Cabex
+                                    if(count($cabex_data)>0 && $cpd_id!=''){
+                                        foreach($cabex_data as $capdata){
+                                            $cpac = getCompanyPlayAnnualCapex($company_play_id, $cpd_id, $capdata['year']);
+                                            if($cpac){
+                                                $cpa_capex_id = $cpac->cpa_capex_id;
+                                                updateCompanyPlayAnnualCapex($capdata, $cpa_capex_id);
+                                            }else{
+                                                addCompanyPlayAnnualCapex($capdata, $company_play_id, $cpd_id);
+                                            }
+                                        }
+                                    }
+                                    
+                                    
+                                    // Company Play Wells
+                                    if(count($wells_data)>0 && $cpd_id!=''){
+                                        foreach($wells_data as $welldata){
+                                            $cpaw = getCompanyPlayAnnualWells($company_play_id, $cpd_id, $welldata['year']);
+                                            if($cpaw){
+                                                $cpa_wells_id = $cpaw->cpa_wells_id;
+                                                updateCompanyPlayAnnualWells($welldata, $cpa_wells_id);
+                                            }else{
+                                                addCompanyPlayAnnualWells($welldata, $company_play_id, $cpd_id);
+                                            }
+                                        }
+                                    }                                    
+                                    
+                                    // Company Play Production
+                                    if(count($production_data)>0 && $cpd_id!=''){
+                                        foreach($production_data as $prod_data){
+                                            $cpap = getCompanyPlayAnnualProduction($company_play_id, $cpd_id, $prod_data['year']);
+                                            if($cpap){
+                                                $cpa_production_id = $cpap->cpa_production_id;
+                                                updateCompanyPlayAnnualProduction($prod_data, $cpa_production_id);
+                                            }else{
+                                                addCompanyPlayAnnualProduction($prod_data, $company_play_id, $cpd_id);
+                                            }    
+                                        }
+                                    }
+                                    
+                                }// Update ENDS
+                                
+                            }
+                            // Value Insertion ENDS //////////////
+
+                        }
+                    }
+
+
+                }
+
+            }   // end of FOR loop
+            db_query('SET foreign_key_checks=1'); 
+            
+            update_processing_fileinfo($file_id);
+            return $file_id;            
+        
+        
+    } else {
+        return "file_not_exist";
+    }   // end if - file exists
+    
+    
+}
+
+
+
+function generateLogMessage($play_name,$company_name,$company_play_info,$cabex_data,$wells_data,$production_data){
+    $msg = '';
+    try{        
+        $cpinfo='';
+        if(count($company_play_info)>0){
+            $cpinfo = implode(',', $company_play_info);
+        }                           
+
+        $cabex = '';
+//        if(count($cabex_data)>0){
+//            $cabex = implode(',',$cabex_data);
+//        }
+
+        $wells = '';
+//        if(count($wells_data)>0){
+//            $wells = implode(',',$wells_data);
+//        }
+
+        $prod = '';
+//        if(count($production_data)>0){
+//            $prod = implode(',',$production_data);
+//        }        
+        $msg = $play_name.','.$company_name.','.$cpinfo;
+        
+    }catch (Exception $e){
+        watchdog( 'oa_generate_log_message', $e->getMessage() );
+    }
+    return $msg;
+}
+
+// hook_theme
+function hart_excelread_theme() {
+    return array(
+        'display_operator_assets' => array(            
+            'variables' => array(),
+            'template' => 'templates/view_op_assets'
+        )
+    );
+}
+
+function get_companies(){
+    $query = db_select('oa_company', 'c');            
+    $query->fields('c');    
+    $query->orderBy('c.company_name');
+    $result = $query->execute()->fetchAll();
+    return $result;
+}
+
+function get_company_plays($company_id){
+    $query = db_select('oa_play', 'p');   
+    $query->join('oa_company_play', 'cp', 'p.play_id = cp.play_id');
+    $query->join('oa_company', 'c', 'cp.company_id = c.company_id');
+    $query->fields('cp',array('company_play_id','play_id','company_id'));    
+    $query->fields('p',array('play_name'));    
+    $query->condition('c.company_id', $company_id , '=');
+    $query->orderBy('p.play_name');
+    $result = $query->execute()->fetchAll();
+    return $result;
+}
+
+function get_company_by_id($company_id){
+    $query = db_select('oa_company', 'c');            
+    $query->fields('c');    
+    $query->condition('c.company_id', $company_id , '=');
+    $result = $query->execute()->fetch();
+    return $result;
+}
+
+function get_comp_annual_report_by_cid($company_id) {
+    $query = db_select('oa_company_annual_report');
+    $query->condition('company_id', $company_id, '=');    
+    $query->fields('oa_company_annual_report');
+    $result = $query->execute()->fetchAll();
+    return $result;
+}
+
+function get_comp_quarter_report_by_cid($company_id) {
+    $query = db_select('oa_company_quarter_report','cqr');
+    //$query->join('oa_quarter', 'q', 'cqr.quarter_code = q.quarter_code');
+    $query->condition('cqr.company_id', $company_id, '=');
+    $query->fields('cqr');
+    $result = $query->execute()->fetchAll();
+    return $result;
+}
+
+function get_comp_ann_capex_by_cid($company_id) {
+    $query = db_select('oa_company_annual_capex');
+    $query->condition('company_id', $company_id, '=');    
+    $query->fields('oa_company_annual_capex');
+    $result = $query->execute()->fetchAll();
+    return $result;
+}
+
+function get_comp_ann_ebidax_by_cid($company_id) {
+    $query = db_select('oa_company_annual_ebidax');
+    $query->condition('company_id', $company_id, '=');    
+    $query->fields('oa_company_annual_ebidax');
+    $result = $query->execute()->fetchAll();
+    return $result;
+}
+
+
+function get_company_play_id($company_id,$play_id){
+    $query = db_select('oa_company_play', 'cp');            
+    $query->fields('cp',array('company_play_id'));    
+    $query->condition('cp.company_id', $company_id , '=');
+    $query->condition('cp.play_id', $play_id , '=');
+    $result = $query->execute()->fetch();
+    return $result;
+}
+
+function get_comp_play_details_by_cpid($company_play_id) {
+    $query = db_select('oa_company_play_details');
+    $query->condition('company_play_id', $company_play_id, '=');    
+    $query->fields('oa_company_play_details');
+    $result = $query->execute()->fetchAll();
+    return $result;
+}
+
+function op_assets(){
+    $companies = get_companies();    
+    $comp_plays = array();
+    $comp_details = array();
+    $comp_ann_rep = array();
+    $comp_quar_rep = array();
+    $comp_ann_capex = array();
+    $comp_ann_ebidax = array();
+    $comp_play_id = '';
+    $comp_play_details = array();
+    
+    $qstring = array();
+    if(isset($_GET)){
+        foreach ($_GET as $name => $value){
+            $qstring[$name] = $value;
+        }
+    }    
+    
+    if(isset($qstring['c']) && $qstring['c']!=''){
+        $comp_plays = get_company_plays($qstring['c']);
+        $comp_details = get_company_by_id($qstring['c']);
+        $comp_ann_rep = get_comp_annual_report_by_cid($qstring['c']);
+        $comp_quar_rep = get_comp_quarter_report_by_cid($qstring['c']);
+        $comp_ann_capex = get_comp_ann_capex_by_cid($qstring['c']);
+        $comp_ann_ebidax = get_comp_ann_ebidax_by_cid($qstring['c']);
+        
+        if(isset($qstring['p']) && $qstring['p']!=''){
+            $cpres = get_company_play_id($qstring['c'],$qstring['p']);  //print_r($cpres);            
+            $comp_play_id = (isset($cpres->company_play_id)) ? $cpres->company_play_id : '';
+            if($comp_play_id!=''){
+                $comp_play_details = get_comp_play_details_by_cpid($comp_play_id);
+            }        
+            
+        }
+        
+        
+    }
+    
+    $reports = array( 'companies'=>$companies , 'qstring' => $qstring, 'comp_plays' => $comp_plays, 'comp_details' => $comp_details,
+                        'comp_ann_rep'=>$comp_ann_rep ,'comp_quar_rep'=> $comp_quar_rep ,'comp_ann_capex'=>$comp_ann_capex,
+                    'comp_ann_ebidax'=>$comp_ann_ebidax, 'comp_play_details'=>$comp_play_details);
+    return theme('display_operator_assets', $reports);  
+}
+
+
+function projects_list($fid) {
+    //$output = drupal_get_form("upload_form");
+    $header = array( 'Sheet_Title', 'Sheet_Column', 'Sheet_Row', 'Message');
+
+    # set the database table
+    $query = db_select('oa_log_table', 'p');
+
+    # get the desired fields from the database
+    $query->fields('p', array( 'sheet_title', 'sheet_column', 'sheet_row', 'message'))->orderBy('id', 'DESC');
+    //        /->limit(3);
+    $query->condition('p.fid', $fid , '=');
+
+    # execute the query
+    $results = $query->execute();
+
+    # build the table fields
+    $rows = array();
+    $output;
+    foreach ($results as $row) {
+      $rows[] = array( $row->sheet_title, $row->sheet_column,$row->sheet_row,$row->message);
+    }
+    //$output .= theme('table', array('header' => $header,'rows' => $rows ));
+
+    # add the pager
+    // $output .= theme('pager');
+    return array(
+             '#theme' => 'table',
+             '#header' => $header,
+             '#rows' => $rows,
+          );
+}
