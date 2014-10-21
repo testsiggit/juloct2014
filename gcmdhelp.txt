@@ -6,6 +6,5 @@ git remote add origin https://github.com/testsiggit/juloct2014.git
 git push -u origin master
 …or push an existing repository from the command line
 
- git remote add origin https://github.com/testsiggit/juloct2014.git
+git remote add origin https://github.com/testsiggit/juloct2014.git
 git push -u origin master
-
