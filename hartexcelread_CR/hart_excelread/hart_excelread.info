@@ -1,0 +1,11 @@
+name = Hart Excel Sheet Reader
+description = Customization for Reading Excel file, Parsing and Inserting into Database.
+
+core = "7.x"
+package = Hart
+version = "7.x-1.0"
+
+;dependencies[] = print
+
+;scripts[] = js/hart_share.js
+stylesheets[all][] = css/hart_excelread.css

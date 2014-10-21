@@ -1,0 +1,13 @@
+form#upload-form {
+    background: none repeat scroll 0 0 #ccc;
+    border: 1px solid;
+    height: 100%;
+    width: 100%;
+    padding: 20px;
+}
+
+div.upload_form #edit-file {
+    padding: 20px 0;
+}
+
+form#upload-form table,form#upload-form table th,form#upload-form table td{border-collapse : collapse; border : 1px solid black; padding: 2px;}
